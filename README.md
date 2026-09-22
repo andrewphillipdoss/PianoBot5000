@@ -18,6 +18,12 @@ module; each "code we'd write" box (cleanup, voicing, labeling,
 assembly) is plain Python with no ML dependency, so it can be unit
 tested without any model installed.
 
+See [`docs/pipeline-roadmap.html`](docs/pipeline-roadmap.html) for two
+concrete, not-yet-built next steps (swing-aware quantization, and
+consolidating repeated sections into one learned pattern) and the
+longer-term idea behind them. Download and open it in a browser to
+view it rendered — GitHub only shows its source.
+
 ## Project layout
 
 ```

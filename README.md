@@ -81,7 +81,7 @@ chord estimator later only means rewriting `extract_chords()`.
 ## Usage
 
 ```bash
-pianobot path/to/song.mp3 -o song.mid
+pianobot convert path/to/song.mp3 -o song.mid
 ```
 
 Options: `--work-dir` (where stems + intermediate analysis JSON are
@@ -94,11 +94,37 @@ cleanup/voicing logic without waiting on Demucs/allin1 again. Delete
 the relevant file under `<work-dir>/analysis/` (or the whole work dir)
 to force a stage to re-run.
 
+### Debugging: run one stage at a time
+
+If `convert` doesn't produce what you expect, run each stage on its
+own and inspect its output before moving to the next — much faster
+than guessing which of the four models is at fault:
+
+```bash
+pianobot stems     song.mp3   # Demucs: prints where vocals/drums/bass/other.wav landed
+pianobot structure song.mp3   # allin1: prints beat/downbeat count + detected sections
+pianobot melody    song.mp3   # Basic Pitch: prints the raw, then cleaned-up melody notes
+pianobot chords    song.mp3   # Chordino: prints the raw, then beat-snapped/voiced chords
+pianobot assemble  song.mp3 -o song.mid   # no models -- just builds the MIDI from what's cached
+```
+
+Every one of these (plus `convert`) reads and writes the same on-disk
+cache under `<work-dir>/analysis/`, so you can run them in any order,
+any number of times, and mix them freely with full `convert` runs —
+whatever's already cached gets reused instead of recomputed. `melody`
+and `chords` will show you raw model output immediately even before
+`structure` has run; they just can't show the beat-quantized/snapped
+version until there's a beat grid to snap onto. `assemble` is the odd
+one out: it never touches a model, so it's instant and is the fastest
+way to experiment with the final MIDI-writing step, as long as
+`structure`, `melody`, and `chords` have each been run at least once
+first (in any order).
+
 ### No song file yet? Generate a synthetic one
 
 ```bash
 python -c "from pianobot.synth import generate_synthetic_song; generate_synthetic_song('synthetic.wav')"
-pianobot synthetic.wav -o synthetic.mid
+pianobot convert synthetic.wav -o synthetic.mid
 ```
 
 `synth.py` generates a short toy "song" (a vibrato melody line over a

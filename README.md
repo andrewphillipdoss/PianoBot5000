@@ -25,7 +25,7 @@ src/pianobot/
   types.py        data contracts shared between stages (NoteEvent, ChordEvent, Beat, Section, ...)
   stems.py         Demucs wrapper
   melody.py        Basic Pitch wrapper + monophonic/quantize cleanup
-  chords.py        Chordino (vamp) wrapper + beat-snapped triad voicing
+  chords.py        Chordino (vamp) wrapper + beat-snapped, voice-led triad voicing
   structure.py     allin1 wrapper + A/B/C repeat labeling
   assemble.py      pretty_midi assembly -> .mid file
   pipeline.py      orchestrates the stages, caches intermediate JSON per stage

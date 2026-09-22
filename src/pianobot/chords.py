@@ -240,32 +240,125 @@ def snap_chords_to_beats(chords: list[ChordEvent], beats: list[Beat]) -> list[Ch
 
 
 def voice_triads(chords: list[ChordEvent], base_octave: int = 3, velocity: int = 75) -> list[NoteEvent]:
-    """Turn each chord into a close-position left-hand triad.
+    """Turn each chord into a close-position left-hand triad, choosing
+    each triad's *inversion* to keep consecutive chords close together
+    in pitch (basic voice leading) instead of always playing root
+    position.
 
-    base_octave=3 puts roots roughly in MIDI 48-59 (C3-B3), a typical
-    left-hand register.
+    base_octave=3 anchors new phrases/first chords roughly in MIDI
+    48-59 (C3-B3), a typical left-hand register; later chords can drift
+    a little above or below that as voice leading calls for it.
 
-    ("Close position" means the three notes are stacked as tightly as
-    possible -- root, then the next note up, then the next -- rather
-    than spread out across multiple octaves.)
+    ("Close position" means a triad's three notes are stacked as
+    tightly as possible -- e.g. C-E-G, not C...E...G spread across
+    octaves. "Inversion" is *which* of the triad's three notes is on
+    the bottom: root position has the root on the bottom (C-E-G), 1st
+    inversion has the third on the bottom (E-G-C), 2nd inversion has
+    the fifth on the bottom (G-C-E) -- all three are "a C major triad,"
+    just arranged differently. "Voice leading" is choosing, of those
+    three equally-valid options, whichever one requires the smallest
+    hand movement from the chord that came just before it.)
     """
     notes: list[NoteEvent] = []
     # MIDI note 0 is C in octave "-1" by convention, so MIDI note
     # 12 * (octave + 1) gives the C at the start of any given octave.
     # E.g. base_octave=3 -> 12 * 4 = 48, which is indeed C3 in MIDI numbering.
     root_base = 12 * (base_octave + 1)  # MIDI note 0 = C-1
+
+    # Tracks the *average* pitch (in MIDI note numbers) of whichever
+    # voicing we chose for the previous chord, so each new chord can
+    # ask "which of my 3 possible inversions lands closest to that?"
+    # None means "no previous chord yet" -- see below.
+    prev_centroid: float | None = None
+
     for chord in chords:
         if chord.quality == "N":
             # "No chord" isn't an actual chord to voice -- skip it so
-            # we don't add silent/nonsensical notes.
+            # we don't add silent/nonsensical notes. We deliberately
+            # leave prev_centroid untouched here, so voice leading
+            # still looks across a brief silent gap to the last real
+            # chord, instead of forgetting where the hand was.
             continue
+
         # Look up which semitone offsets make up this chord's triad;
         # fall back to a major triad's shape if we somehow got a
         # quality string we don't recognize (shouldn't normally happen,
         # since _parse_harte_label always returns one of our four
         # buckets, but this keeps the function safe either way).
-        intervals = _TRIAD_INTERVALS.get(chord.quality, _TRIAD_INTERVALS["maj"])
-        root_pitch = root_base + chord.root_pitch_class
-        for interval in intervals:
-            notes.append(NoteEvent(pitch=root_pitch + interval, start=chord.start, end=chord.end, velocity=velocity))
+        _root_offset, third_offset, fifth_offset = _TRIAD_INTERVALS.get(chord.quality, _TRIAD_INTERVALS["maj"])
+        root_pc = chord.root_pitch_class
+        third_pc = (root_pc + third_offset) % 12
+        fifth_pc = (root_pc + fifth_offset) % 12
+
+        # Build all three inversions as candidate voicings. Each is a
+        # (bottom, middle, top) ordering of the same three pitch
+        # classes; `_stack_close_position` turns that ordering into
+        # actual ascending MIDI pitches, anchored near `root_base`.
+        candidates = [
+            _stack_close_position((root_pc, third_pc, fifth_pc), root_base),   # root position
+            _stack_close_position((third_pc, fifth_pc, root_pc), root_base),   # 1st inversion
+            _stack_close_position((fifth_pc, root_pc, third_pc), root_base),   # 2nd inversion
+        ]
+
+        if prev_centroid is None:
+            # First chord of the sequence (or first after the very
+            # start): there's nothing to lead smoothly *from* yet, so
+            # there's no meaningful "closest" choice -- root position
+            # is the unremarkable, obvious default.
+            chosen = candidates[0]
+        else:
+            # Every other chord: pick whichever of the 3 inversions'
+            # average pitch sits nearest to the previous chord's
+            # average pitch. This is a deliberately simple
+            # approximation of "real" voice leading (which would
+            # compare each candidate's notes one-by-one against the
+            # previous chord's notes) -- comparing just the averages
+            # is much less code and is usually good enough. A fuller
+            # version would compare each candidate's notes one-by-one
+            # against the previous chord's notes instead of just their
+            # averages -- worth it only if this ever turns out to pick
+            # an audibly bad voicing in practice.
+            chosen = min(candidates, key=lambda pitches: abs(_centroid(pitches) - prev_centroid))
+
+        prev_centroid = _centroid(chosen)
+        for pitch in chosen:
+            notes.append(NoteEvent(pitch=pitch, start=chord.start, end=chord.end, velocity=velocity))
     return notes
+
+
+def _stack_close_position(pitch_classes: tuple[int, int, int], anchor: int) -> list[int]:
+    """Turn 3 pitch classes (0-11 each) into 3 real, ascending MIDI
+    pitches -- e.g. pitch classes (4, 7, 0) [E, G, C] anchored near
+    MIDI 48 becomes [52, 55, 60] (E3, G3, C4): the smallest possible
+    upward stack starting from an E near that anchor.
+
+    `anchor` only has to be *near* the first pitch class's target
+    octave -- the first note is placed at whichever MIDI pitch nearest
+    `anchor` has that pitch class, and each following note is placed
+    at the nearest higher pitch (at most 11 semitones above the one
+    before it) that matches the next required pitch class. The result
+    is always a tight, "close position" stack, never spread out.
+    """
+    # Move `anchor` down (or up) onto the exact pitch class we need for
+    # the bottom note, without changing which octave it's roughly in.
+    bottom = anchor - (anchor % 12) + pitch_classes[0]
+    stack = [bottom]
+    for pitch_class in pitch_classes[1:]:
+        previous = stack[-1]
+        # Walk upward one semitone at a time from the last note we
+        # placed until we land on a pitch matching the next pitch
+        # class -- this always takes at most 11 steps, since pitch
+        # classes repeat every 12 semitones.
+        candidate = previous + 1
+        while candidate % 12 != pitch_class:
+            candidate += 1
+        stack.append(candidate)
+    return stack
+
+
+def _centroid(pitches: list[int]) -> float:
+    """The average of a list of MIDI pitches -- a cheap stand-in for
+    "roughly where in pitch-space this voicing sits," used to compare
+    candidate voicings against each other in `voice_triads`.
+    """
+    return sum(pitches) / len(pitches)

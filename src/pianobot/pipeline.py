@@ -57,13 +57,21 @@ def analysis_dir_for(work_dir: Path) -> Path:
     return d
 
 
-def run_pipeline(audio_path: Path, work_dir: Path, out_path: Path, tempo: float = 120.0) -> Path:
+def run_pipeline(
+    audio_path: Path,
+    work_dir: Path,
+    out_path: Path,
+    tempo: float = 120.0,
+    subdivisions_per_beat: int = 4,
+) -> Path:
     """Run every pipeline stage on one song and write out a piano MIDI file.
 
     audio_path: the input song (e.g. an .mp3 or .wav)
     work_dir: a scratch folder for stems + cached intermediate analysis
     out_path: where to write the final .mid file
     tempo: BPM to record in the output MIDI file's tempo track
+    subdivisions_per_beat: melody quantization grid resolution -- see
+        the tradeoff explained in melody.clean_melody's docstring
 
     This is exactly the same sequence of calls as running
     `pianobot stems`, `structure`, `melody`, `chords`, then `assemble`
@@ -105,7 +113,7 @@ def run_pipeline(audio_path: Path, work_dir: Path, out_path: Path, tempo: float 
     # Collapse Basic Pitch's raw (possibly messy/overlapping) output
     # into a single quantized melody line, using the beat grid from
     # Stage 2.
-    clean_melody_notes = melody.clean_melody(raw_melody, beats)
+    clean_melody_notes = melody.clean_melody(raw_melody, beats, subdivisions_per_beat)
 
     # --- Stage 4: detect chords and voice them for the left hand ---
     # Chordino works best on a "harmonic" mix (bass + other instruments,

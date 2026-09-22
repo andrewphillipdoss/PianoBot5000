@@ -81,6 +81,13 @@ def _preview(items: list, formatter, limit: int = 15) -> None:
 # --help text) everywhere.
 _AUDIO_ARG = typer.Argument(..., exists=True, help="Input song audio file (wav/mp3/...).")
 _WORK_DIR_OPT = typer.Option(None, "--work-dir", help="Directory for stems/intermediate analysis. Defaults to ./.pianobot/<audio-stem>")
+_SUBDIVISIONS_OPT = typer.Option(
+    4, "--subdivisions-per-beat",
+    help="Melody quantization grid resolution: 4 = 16th notes, 2 = 8th notes, 1 = beats only. "
+         "Raise it if a fast vocal run is getting collapsed/dropped; lower it if the melody "
+         "sounds fussy/jittery (picking up Basic Pitch's timing noise as real rhythm). "
+         "See melody.clean_melody's docstring for the full tradeoff.",
+)
 
 
 @app.command()
@@ -89,6 +96,7 @@ def convert(
     output: Path = typer.Option(None, "-o", "--output", help="Output MIDI path. Defaults to <audio-stem>.mid"),
     work_dir: Path = _WORK_DIR_OPT,
     tempo: float = typer.Option(120.0, "--tempo", help="Tempo (BPM) written into the MIDI file's initial tempo event."),
+    subdivisions_per_beat: int = _SUBDIVISIONS_OPT,
 ) -> None:
     """Run the full pipeline: stems -> melody/chords/structure -> MIDI."""
     # `output or audio.with_suffix(".mid")` means: if `output` is
@@ -107,7 +115,10 @@ def convert(
     # This is the actual pipeline call -- everything above was just
     # figuring out what arguments to pass it. See pipeline.py for what
     # happens next.
-    result_path = run_pipeline(audio_path=audio, work_dir=work_dir, out_path=output, tempo=tempo)
+    result_path = run_pipeline(
+        audio_path=audio, work_dir=work_dir, out_path=output, tempo=tempo,
+        subdivisions_per_beat=subdivisions_per_beat,
+    )
 
     console.print(f"[green]Wrote {result_path}[/green]")
 
@@ -147,7 +158,11 @@ def structure(audio: Path = _AUDIO_ARG, work_dir: Path = _WORK_DIR_OPT) -> None:
 
 
 @app.command()
-def melody(audio: Path = _AUDIO_ARG, work_dir: Path = _WORK_DIR_OPT) -> None:
+def melody(
+    audio: Path = _AUDIO_ARG,
+    work_dir: Path = _WORK_DIR_OPT,
+    subdivisions_per_beat: int = _SUBDIVISIONS_OPT,
+) -> None:
     """Stage 3 only: run Basic Pitch on the vocal stem and print the melody.
 
     Runs stem separation first if it hasn't been done yet (reused from
@@ -174,7 +189,7 @@ def melody(audio: Path = _AUDIO_ARG, work_dir: Path = _WORK_DIR_OPT) -> None:
         return
 
     beats, _sections = pipeline.load_json(structure_cache)
-    cleaned = melody_stage.clean_melody(raw_notes, beats)
+    cleaned = melody_stage.clean_melody(raw_notes, beats, subdivisions_per_beat)
     console.print(f"[green]Cleaned up to {len(cleaned)} monophonic, quantized notes:[/green]")
     _preview(cleaned, lambda n: f"{_note_name(n.pitch)}  {n.start:.2f}s - {n.end:.2f}s  vel={n.velocity}")
 
@@ -225,6 +240,7 @@ def assemble(
     output: Path = typer.Option(None, "-o", "--output", help="Output MIDI path. Defaults to <audio-stem>.mid"),
     work_dir: Path = _WORK_DIR_OPT,
     tempo: float = typer.Option(120.0, "--tempo", help="Tempo (BPM) written into the MIDI file's initial tempo event."),
+    subdivisions_per_beat: int = _SUBDIVISIONS_OPT,
 ) -> None:
     """Stage 5 only: build the final MIDI file purely from already-cached
     structure/melody/chords analysis -- runs no models at all, so it's
@@ -255,7 +271,7 @@ def assemble(
     beats, raw_sections = pipeline.load_json(analysis_dir / "structure.json")
     sections = structure_stage.label_repeats(raw_sections)
     raw_melody = pipeline.load_json(analysis_dir / "melody_raw.json")
-    clean_melody_notes = melody_stage.clean_melody(raw_melody, beats)
+    clean_melody_notes = melody_stage.clean_melody(raw_melody, beats, subdivisions_per_beat)
     raw_chords = pipeline.load_json(analysis_dir / "chords_raw.json")
     snapped_chords = chords_stage.snap_chords_to_beats(raw_chords, beats)
     chord_notes = chords_stage.voice_triads(snapped_chords)

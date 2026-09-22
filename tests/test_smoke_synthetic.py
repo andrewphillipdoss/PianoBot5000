@@ -51,7 +51,11 @@ def test_clean_melody_collapses_overlaps_and_quantizes():
         NoteEvent(pitch=64, start=0.20, end=0.46, velocity=40),  # quieter, overlapping -> dropped/trimmed
         NoteEvent(pitch=62, start=0.51, end=0.97, velocity=80),
     ]
-    cleaned = melody.clean_melody(raw_notes, beats)
+    # Pass subdivisions_per_beat explicitly (rather than relying on
+    # clean_melody's default) so this test keeps checking the
+    # *mechanism* regardless of whatever the library's default happens
+    # to be set to.
+    cleaned = melody.clean_melody(raw_notes, beats, subdivisions_per_beat=2)
 
     # Every remaining note should still have positive duration (no
     # zero-or-negative-length leftovers from the trimming logic).
@@ -64,11 +68,10 @@ def test_clean_melody_collapses_overlaps_and_quantizes():
     # floating-point rounding dust.
     for a, b in zip(cleaned, cleaned[1:]):
         assert a.end <= b.start + 1e-9
-    # quantized onto the beat subdivision grid (default: 2 subdivisions/beat).
-    # We rebuild the same grid `clean_melody` used internally (by
-    # calling its private `_beat_grid` helper directly) so we can
-    # confirm every note's start/end lines up exactly with one of
-    # those grid points.
+    # quantized onto the same beat subdivision grid we asked for above.
+    # We rebuild that grid (by calling clean_melody's private
+    # `_beat_grid` helper directly) so we can confirm every note's
+    # start/end lines up exactly with one of those grid points.
     grid = melody._beat_grid(beats, subdivisions_per_beat=2)
     for n in cleaned:
         # `any(... for g in grid)` is True if the note's start/end is

@@ -74,7 +74,7 @@ def extract_melody_notes(vocals_path: Path) -> list[NoteEvent]:
     return notes
 
 
-def clean_melody(notes: list[NoteEvent], beats: list[Beat], subdivisions_per_beat: int = 2) -> list[NoteEvent]:
+def clean_melody(notes: list[NoteEvent], beats: list[Beat], subdivisions_per_beat: int = 4) -> list[NoteEvent]:
     """Collapse to a single monophonic line and snap onsets/offsets to
     the beat grid, matching the diagram's "one note, quantized" box.
 
@@ -84,6 +84,22 @@ def clean_melody(notes: list[NoteEvent], beats: list[Beat], subdivisions_per_bea
     here, the nearest fraction of a beat -- so notes line up cleanly
     with the song's rhythm instead of starting/stopping at slightly
     off-kilter, messy-looking times.)
+
+    subdivisions_per_beat defaults to 4 (16th-note resolution, assuming
+    a beat = one quarter note). This is a real tradeoff, not just a
+    knob: too coarse (e.g. 2, eighth notes) and a fast vocal run can
+    have several distinct notes forced onto the *same* grid point --
+    `_quantize` below then drops all but one of them outright, since a
+    zero-length note (start == end after snapping) gets filtered out.
+    Too fine (e.g. 8+, 32nd notes or finer) and you start quantizing
+    onto Basic Pitch's own note-timing jitter (typically tens of
+    milliseconds) as if it were real rhythmic content, which just makes
+    the output fussier without being more accurate. 4 is a reasonable
+    default for pop/vocal melodies; pass a different value if a
+    particular song's melody is unusually fast/slow-moving. (This
+    doesn't attempt to handle swing -- an even N-way subdivision always
+    assumes "straight" timing, so a swung eighth note would get forced
+    onto the same grid point as a straight one.)
     """
     mono = _to_monophonic(notes)
     # If we have no beat information at all (e.g. structure detection

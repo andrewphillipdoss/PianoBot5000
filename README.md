@@ -86,7 +86,13 @@ pianobot convert path/to/song.mp3 -o song.mid
 
 Options: `--work-dir` (where stems + intermediate analysis JSON are
 cached, default `./.pianobot/<song-name>/`), `--tempo` (BPM written
-into the MIDI file).
+into the MIDI file), `--subdivisions-per-beat` (melody quantization
+grid resolution — default 4, i.e. 16th notes; raise it if a fast vocal
+run is getting collapsed/dropped, lower it if the melody sounds
+fussy/jittery from picking up transcription noise as real rhythm; see
+`melody.clean_melody`'s docstring for the full tradeoff). Note this
+grid is always "straight" (evenly subdivided) — it doesn't attempt to
+detect or preserve a swing feel.
 
 Re-running on the same song reuses cached stems/analysis instead of
 re-running the models — handy for iterating on `assemble.py` or the

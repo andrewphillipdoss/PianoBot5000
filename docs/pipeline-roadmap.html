@@ -287,10 +287,12 @@
     <span class="status-chip">ROADMAP — nothing below is built yet</span>
     <h1>Pipeline Roadmap</h1>
     <p class="lede">
-      Two concrete next steps for PianoBot5000's melody/chord pipeline, plus
-      the longer-term idea they're both in service of. Neither step is built;
-      both are designed to plug into the existing code without adding a new
-      model or pipeline stage.
+      Two concrete next steps for PianoBot5000's melody/chord pipeline, an
+      open question for a new, separate interface piece, and the
+      longer-term idea it's all in service of. Nothing below is built —
+      the two pipeline steps are designed to plug into the existing code
+      without adding a new model or stage; the interface piece is a
+      genuinely different part of the codebase, not yet scoped.
     </p>
   </header>
 
@@ -605,6 +607,58 @@
         which one wins — "highest-confidence occurrence takes it all" vs.
         "per-slot majority vote." Worth deciding from real disagreement
         patterns on an actual song, not settled in the abstract here.
+      </p>
+    </div>
+  </section>
+  </section>
+
+  <section class="step-block">
+  <div class="step-eyebrow"><span class="num">INTERFACE</span><h2>Playback via Neothesia</h2></div>
+  <p class="step-intro">
+    A different kind of next step from the two above — not a change to
+    how melody/chords/structure get analyzed, but a new, separate part
+    of the codebase: something to actually watch and hear a generated
+    arrangement, instead of just opening the .mid file in whatever
+    happens to be installed. The plan is to lean on
+    <a href="https://polymeilex.github.io/Neothesia/" style="color:inherit">Neothesia</a>,
+    an existing open-source falling-notes MIDI visualizer, rather than
+    building a visualizer from scratch. First iteration: just get a
+    generated .mid file playing in it.
+  </p>
+
+  <section class="notes-grid">
+    <div class="note-card">
+      <h2>What we verified</h2>
+      <p>
+        Neothesia is a standalone native Rust app (GPL-3.0) — not a
+        Python dependency, installed separately (Flathub, the AUR, a
+        GitHub release binary, or <code class="inline-code">cargo build</code>).
+        Its own source shows <code class="inline-code">Song::from_env()</code>
+        reading <code class="inline-code">std::env::args()[1]</code> as a
+        MIDI file path to auto-load on launch — so
+        <code class="inline-code">neothesia song.mid</code> opens straight
+        into playback, no in-app file picker needed. It also needs a
+        <code class="inline-code">.sf2</code> soundfont configured once
+        through its own settings UI, outside PianoBot5000's control. A
+        separate <code class="inline-code">neothesia-cli</code> crate
+        exists too, but it's a headless MIDI→video exporter (via
+        ffmpeg), not an interactive player — a possible bonus path
+        later, not this.
+      </p>
+    </div>
+    <div class="note-card">
+      <h2>What's still open</h2>
+      <p>
+        Deliberately undecided for now: whether launching it blocks the
+        terminal until the window closes, or returns immediately;
+        whether the <code class="inline-code">neothesia</code> binary
+        is assumed to be on <code class="inline-code">PATH</code> or
+        configurable; whether this becomes a
+        <code class="inline-code">pianobot play</code>-style CLI
+        command, its own small script, or just a documented manual
+        step for the first cut; and whether it's worth a preflight
+        "is Neothesia installed?" check like the existing model stages
+        have.
       </p>
     </div>
   </section>

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pianobot5000"
+version = "0.1.0"
+description = "Song audio -> piano-arrangement MIDI file (melody + chord-voiced left hand + section markers)"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "soundfile>=0.12",
+    "pretty_midi>=0.2.10",
+    "librosa>=0.10",
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+# Each pipeline stage's real model, isolated so a laptop install can be done
+# incrementally / per-stage instead of all-or-nothing.
+stems = ["demucs>=4.0"]
+melody = ["basic-pitch>=0.4"]
+chords = ["vamp>=1.1.0"]
+structure = ["allin1>=0.1"]
+all = ["pianobot5000[stems,melody,chords,structure]"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+pianobot = "pianobot.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]

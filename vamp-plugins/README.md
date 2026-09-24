@@ -1,26 +1,16 @@
 # Vamp plugins for the Docker build
 
 Chordino (chord detection, `pianobot chords`) is a compiled **Vamp
-plugin**, not a Python package — `pip` can't install it, and it isn't
-something this Dockerfile can safely download automatically (the
-plugin's own binary distribution).
+plugin**, not a Python package. The Dockerfile now builds it
+automatically from source (`github.com/c4dm/nnls-chroma`) against
+Debian's packaged Vamp SDK — its old prebuilt-binary download page
+(vamp-plugins.org) points at a dead host, so there was no binary left
+to fetch, but the source still builds cleanly. Nothing in this folder
+is required any more.
 
-**One-time step, before running `docker build`:**
-
-1. Download the **Linux** build of the NNLS Chroma Vamp plugin (which
-   provides Chordino) from
-   https://www.vamp-plugins.org/download.html#nnls-chroma
-2. Unpack it and place its files directly in this folder
-   (`vamp-plugins/`) — typically a `.so` file (or files) plus a `.cat`
-   and/or `.n3` descriptor file that ship alongside it. Keep whatever
-   filenames the download uses.
-3. Build the image as usual (`docker build ...`). The Dockerfile copies
-   everything in this folder into the container's Vamp plugin search
-   path (`/usr/local/lib/vamp`).
-
-This folder is `.gitignore`d (except this README) — the plugin binary
-itself isn't something to commit to the repo.
-
-If you skip this step, the image still builds and everything else
-still works — `pianobot chords` will just report that the Chordino
-plugin isn't installed, exactly like on a native, non-Docker install.
+This folder still exists in case you ever want to add or override a
+plugin build of your own: anything placed here (a `.so` plus its
+`.cat`/`.n3` descriptor) gets copied into the image's Vamp plugin
+search path (`/usr/local/lib/vamp`) alongside the auto-built Chordino.
+It's `.gitignore`d (except this README) — plugin binaries aren't
+something to commit to the repo.

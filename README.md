@@ -59,12 +59,11 @@ whatever machine they're on — the same known-good Linux environment:
 docker build -t pianobot5000 .
 ```
 
-Chordino needs one manual step first (a compiled plugin binary, not a
-pip package — see `vamp-plugins/README.md`): download the Linux NNLS
-Chroma build from
-https://www.vamp-plugins.org/download.html#nnls-chroma and place its
-files in `./vamp-plugins/` before building. Skipping it still builds
-fine — `pianobot chords` will just report the plugin isn't installed.
+That's it — no manual steps first. Chordino (chord detection) is a
+compiled Vamp plugin, not a pip package, and its usual download page
+(vamp-plugins.org) points at a dead host, so the Dockerfile builds it
+from source automatically instead (see `vamp-plugins/README.md` if
+you're curious, or want to add a plugin of your own on top).
 
 Run it against a song on your host machine by mounting a folder in:
 
@@ -110,15 +109,24 @@ pip install -e ".[all]"   # now sees both as already satisfied
 
 Chord detection uses **Chordino**, part of the NNLS Chroma **Vamp
 plugin** — this is a compiled audio-analysis plugin, not a Python
-package, so `pip install` alone isn't enough:
+package, so `pip install` alone isn't enough. Its download page
+(vamp-plugins.org) links out to a host that no longer resolves at all,
+so there's no prebuilt binary left to fetch — build it from source
+instead, same as the Dockerfile does:
 
 1. `pip install -e ".[chords]"` installs the `vamp` Python host bindings.
-2. Download and install the NNLS Chroma Vamp plugin for your OS from
-   https://www.vamp-plugins.org/download.html#nnls-chroma into your
-   system's Vamp plugin path:
-   - Linux: `~/vamp/` or `/usr/local/lib/vamp/`
-   - macOS: `~/Library/Audio/Plug-Ins/Vamp/`
-   - Windows: `%ProgramFiles%\Vamp Plugins\`
+2. Build NNLS Chroma (Linux):
+   ```bash
+   sudo apt-get install vamp-plugin-sdk libboost-dev   # Debian/Ubuntu
+   git clone --depth 1 https://github.com/c4dm/nnls-chroma.git
+   cd nnls-chroma
+   make -f Makefile.linux VAMP_SDK_DIR=/usr BOOST_ROOT=/usr/include
+   mkdir -p ~/vamp
+   cp nnls-chroma.so nnls-chroma.n3 ~/vamp/
+   ```
+   (macOS/Windows: same repo has `Makefile.osx`/`Makefile.mingw` — you'd
+   need their respective Vamp SDK + Boost installs instead; honestly,
+   Docker is a lot less hassle here.)
 3. Verify it's found:
    ```bash
    python -c "import vamp; print('nnls-chroma:chordino' in vamp.list_plugins())"
@@ -236,10 +244,11 @@ installed (see above).
 ## Status / what's been verified so far
 
 Built and tested in a sandboxed, no-GPU dev container with PyPI/GitHub
-access but a restrictive network policy blocking some other hosts
-(model-weight hosts like huggingface.co/dl.fbaipublicfiles.com, Debian's
-own package mirrors, vamp-plugins.org, PyTorch's dedicated wheel index)
-— specific to that environment, not a requirement of the project itself:
+*API* access but a restrictive network policy blocking plain `git`/`curl`
+to github.com directly, plus some other hosts (model-weight hosts like
+huggingface.co/dl.fbaipublicfiles.com, Debian's own package mirrors,
+vamp-plugins.org, PyTorch's dedicated wheel index) — specific to that
+environment, not a requirement of the project itself:
 
 - All non-ML logic (cleanup, voicing, labeling, MIDI assembly) — unit
   tested, passing (17 tests).
@@ -254,6 +263,14 @@ own package mirrors, vamp-plugins.org, PyTorch's dedicated wheel index)
   (its own `apt-get` layer needs Debian's package mirrors, also
   blocked there) — should build normally with regular internet access;
   every pip-level step it runs was verified directly first.
+- The Chordino build step (`git clone` + `make` against
+  `vamp-plugin-sdk`) is new and untested end-to-end in that sandbox too
+  (direct `git`/`curl` to github.com is blocked there specifically,
+  even though fetching individual files through other means worked) —
+  it's a small, standard C++ build that people have documented doing
+  this exact way for years, but it hasn't been run start-to-finish yet.
+  If it fails on a real build, the error output is the most useful
+  thing to send back.
 
 Next step on a real machine: `docker build -t pianobot5000 .` (or the
 native install), then run `pianobot` on a real song file for the first

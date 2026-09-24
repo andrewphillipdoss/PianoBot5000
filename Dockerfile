@@ -80,15 +80,27 @@ RUN pip install --no-cache-dir --no-deps -e .
 COPY tests ./tests
 
 # --- Chordino (NNLS Chroma) ---------------------------------------------------
-# A compiled Vamp plugin binary, not a pip package. Download the Linux
-# build yourself from https://www.vamp-plugins.org/download.html#nnls-chroma
-# and place its files under ./vamp-plugins/ (next to this Dockerfile,
-# .gitignored, not committed) before running `docker build` -- see
-# vamp-plugins/README.md. Everything there is copied into the image's
-# Vamp plugin search path; if you skip this step, `chords`/`pianobot
-# chords` will just report the plugin isn't installed, same as on a
-# native machine.
-RUN mkdir -p /usr/local/lib/vamp
+# A compiled Vamp plugin, not a pip package. Its usual prebuilt-binary
+# download page (vamp-plugins.org/download.html#nnls-chroma) links out to
+# code.soundsoftware.ac.uk, which is dead (no working host at all, not
+# just an HTTPS issue) -- so there's no binary left to fetch. Its source is
+# still maintained on GitHub, though, and is a small C++ build against
+# Debian's own packaged Vamp SDK, so we build it here instead of asking for
+# a manual download that has nowhere left to come from.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        vamp-plugin-sdk \
+        libboost-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && git clone --depth 1 https://github.com/c4dm/nnls-chroma.git /tmp/nnls-chroma \
+    && cd /tmp/nnls-chroma \
+    && make -f Makefile.linux VAMP_SDK_DIR=/usr BOOST_ROOT=/usr/include \
+    && mkdir -p /usr/local/lib/vamp \
+    && cp nnls-chroma.so nnls-chroma.n3 /usr/local/lib/vamp/ \
+    && cd / && rm -rf /tmp/nnls-chroma
+
+# Anything dropped in ./vamp-plugins/ (gitignored, see vamp-plugins/README.md)
+# is copied in too, in case you ever want to add or override a plugin build
+# of your own -- not required for Chordino any more, since it's built above.
 COPY vamp-plugins/ /usr/local/lib/vamp/
 
 CMD ["pianobot", "--help"]

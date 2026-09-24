@@ -52,6 +52,19 @@ RUN pip install --no-cache-dir --upgrade pip
 # current torch *and* has the API allin1's code expects. Rather than
 # pin torch backwards for every extra sharing this environment, we
 # patch allin1 to not need natten at all -- see patches/allin1/README.md.
+#
+# On platforms without a prebuilt wheel (notably linux/arm64, e.g. an
+# Apple Silicon Mac's Docker VM), demucs's `sphn` dependency compiles
+# from source (via a Rust/maturin build that bootstraps its own
+# toolchain automatically), which in turn builds the Opus codec via
+# CMake. Opus's own CMakeLists.txt declares an ancient minimum CMake
+# version that CMake 4.0+ refuses to configure at all ("Compatibility
+# with CMake < 3.5 has been removed") -- this env var is CMake's own
+# documented escape hatch for exactly that situation (see the
+# CMAKE_POLICY_VERSION_MINIMUM docs on cmake.org), not a hack specific
+# to this project; it affects a lot of the ecosystem post-CMake-4.0.
+ENV CMAKE_POLICY_VERSION_MINIMUM=3.5
+
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir \
         numpy cython soundfile "pretty_midi>=0.2.10" typer rich pytest \

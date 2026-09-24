@@ -271,6 +271,16 @@ environment, not a requirement of the project itself:
   this exact way for years, but it hasn't been run start-to-finish yet.
   If it fails on a real build, the error output is the most useful
   thing to send back.
+- On `linux/arm64` (e.g. Docker Desktop on an Apple Silicon Mac), one
+  real build failure surfaced on a real machine: `demucs`'s `sphn`
+  dependency has no prebuilt wheel for that platform, so pip compiles
+  it from source (a Rust build that bootstraps `cargo` on its own),
+  which in turn builds the Opus codec via CMake — and CMake 4.0+
+  refuses to configure Opus's old `CMakeLists.txt` at all
+  ("Compatibility with CMake < 3.5 has been removed"). Fixed by setting
+  `CMAKE_POLICY_VERSION_MINIMUM=3.5` in the Dockerfile, CMake's own
+  documented opt-back-in for exactly this situation — a known,
+  ecosystem-wide issue post-CMake-4.0, not specific to this project.
 
 Next step on a real machine: `docker build -t pianobot5000 .` (or the
 native install), then run `pianobot` on a real song file for the first

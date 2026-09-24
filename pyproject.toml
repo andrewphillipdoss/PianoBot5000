@@ -32,9 +32,11 @@ chords = ["vamp>=1.1.0"]
 # -e ".[structure]"` at least gets a complete dependency set. madmom's
 # own last PyPI release (0.16.1) doesn't import on Python 3.10+ at all
 # (uses `from collections import MutableSequence`, removed in 3.10),
-# so this pulls its fixed-but-never-released GitHub main branch instead
-# -- see README's "Known issues" for the *separate*, still-open
-# natten/DiNAT incompatibility this doesn't fix.
+# so this pulls its fixed-but-never-released GitHub main branch instead.
+# Separately, allin1 also doesn't *import* successfully against any
+# natten release installable on current torch -- pyproject.toml alone
+# doesn't fix that (it's a code patch, not a dependency); see
+# patches/allin1/README.md and the Dockerfile for the actual fix.
 structure = ["allin1>=0.1", "madmom @ git+https://github.com/CPJKU/madmom.git"]
 all = ["pianobot5000[stems,melody,chords,structure]"]
 dev = ["pytest>=8.0"]

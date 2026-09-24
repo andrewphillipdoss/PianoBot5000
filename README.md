@@ -91,7 +91,7 @@ weight and install stories:
 ```bash
 pip install -e ".[melody]"       # Basic Pitch -- CPU-friendly, weights ship in the pip package
 pip install -e ".[stems]"        # Demucs -- pulls torch, downloads ~80-300MB of weights on first run
-pip install -e ".[structure]"    # allin1 -- pulls torch, downloads weights on first run (see Known issues)
+pip install -e ".[structure]"    # allin1 -- pulls torch, downloads weights on first run (see Known issues re: natten)
 pip install -e ".[chords]"       # vamp python bindings only -- see Chordino setup below
 pip install -e ".[all]"          # all four
 ```
@@ -129,33 +129,36 @@ written as a single-purpose module behind the same `ChordEvent`
 interface everything else consumes — swapping in `madmom` or another
 chord estimator later only means rewriting `extract_chords()`.
 
-## Known issues
+## Known issues (fixed, documented for context)
 
-**`structure` (allin1) installs but doesn't currently work.** Its
-DiNAT model imports specific low-level functions
-(`natten1dav`, `natten1dqkrpb`, ...) from the `natten` package that
-were removed from every `natten` release still capable of installing
-against a current PyTorch — `natten`'s older, API-matching releases
-never shipped prebuilt Linux wheels at all (always compiled from
-source against whatever torch is installed), and their source doesn't
-build against modern torch (hardcoded for torch 1.13's C++ extension
-ABI). `pianobot structure` fails with a clear `ModuleNotFoundError:
-natten` rather than crashing confusingly, but there's currently no
-version of `natten` that's both installable and compatible. A real fix
-means pinning `allin1`/`natten`/`torch` to whatever versions were
-current when allin1 was released (~mid-2023) — which would hold back
-every other extra sharing that same environment, since there's only
-one installed `torch` at a time. Worth its own isolated environment if
-picked up later, not a default-install fix.
+**allin1's shipped DiNAT model doesn't import against any installable
+`natten` release.** Its `dinat.py` imports specific low-level functions
+(`natten1dav`, `natten1dqkrpb`, ...) that were removed from every
+`natten` release still capable of installing against a current
+PyTorch — `natten`'s older, API-matching releases never shipped
+prebuilt Linux wheels at all (always compiled from source against
+whatever torch is installed), and their source doesn't build against
+modern torch (hardcoded for torch 1.13's C++ extension ABI). This is a
+known, actively-discussed upstream issue (allin1's GitHub has several
+open issues/PRs about it), not something specific to this project.
 
-Separately (already fixed, not something you need to do anything
-about): allin1's own packaging never declares `madmom` as a dependency
-at all, despite needing it at runtime — `pyproject.toml`'s `structure`
-extra declares it explicitly. `madmom`'s last PyPI release also
-doesn't import on Python 3.10+ (`from collections import
-MutableSequence`, removed from `collections` in 3.10), so that
-declaration points at its fixed-but-never-released GitHub main branch
-instead of PyPI.
+**Fixed here** by vendoring an unmerged community fix
+(`mir-aidj/all-in-one` PR #39) as `patches/allin1/` — two files the
+Dockerfile copies over allin1's installed `dinat.py`, replacing the
+`natten` calls with a plain-PyTorch equivalent (einsum + indexing) used
+whenever a tensor isn't on CUDA or `natten` isn't importable at all.
+Verified by that PR against 54 test cases to produce identical output,
+and reportedly *faster* than natten's own CPU kernel. See
+`patches/allin1/README.md` for the full rationale and attribution. This
+means `natten` is never actually needed in this Dockerfile at all.
+
+Separately, also fixed: allin1's own packaging never declares `madmom`
+as a dependency at all, despite needing it at runtime —
+`pyproject.toml`'s `structure` extra declares it explicitly.
+`madmom`'s last PyPI release also doesn't import on Python 3.10+ (`from
+collections import MutableSequence`, removed from `collections` in
+3.10), so that declaration points at its fixed-but-never-released
+GitHub main branch instead of PyPI.
 
 ## Usage
 
@@ -187,7 +190,7 @@ than guessing which of the four models is at fault:
 
 ```bash
 pianobot stems     song.mp3   # Demucs: prints where vocals/drums/bass/other.wav landed
-pianobot structure song.mp3   # allin1: currently broken, see "Known issues" above
+pianobot structure song.mp3   # allin1: prints beat/downbeat count + detected sections
 pianobot melody    song.mp3   # Basic Pitch: prints the raw, then cleaned-up melody notes
 pianobot chords    song.mp3   # Chordino: prints the raw, then beat-snapped/voiced chords
 pianobot assemble  song.mp3 -o song.mid   # no models -- just builds the MIDI from what's cached
@@ -242,14 +245,11 @@ own package mirrors, vamp-plugins.org, PyTorch's dedicated wheel index)
   tested, passing (17 tests).
 - Basic Pitch — ran end-to-end (its weights ship inside the pip
   package, no separate download needed).
-- Demucs, vamp, madmom — install and import cleanly on Linux/Python
-  3.11 (verified in a bare venv reproducing the Dockerfile's exact
-  install sequence); actual weight downloads/plugin binaries blocked
-  in that sandbox specifically, expected to work normally elsewhere.
-- allin1 — installs cleanly but doesn't import successfully; see
-  "Known issues" above (a real, current upstream incompatibility
-  between allin1's model code and every installable `natten` release,
-  unrelated to this project's own code).
+- Demucs, vamp, madmom, allin1 — install and fully import cleanly on
+  Linux/Python 3.11 (verified in a bare venv reproducing the
+  Dockerfile's exact install sequence, patch included); actual weight
+  downloads/plugin binaries blocked in that sandbox specifically,
+  expected to work normally elsewhere.
 - `docker build` itself wasn't fully run end-to-end in that sandbox
   (its own `apt-get` layer needs Debian's package mirrors, also
   blocked there) — should build normally with regular internet access;

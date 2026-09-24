@@ -44,24 +44,31 @@ RUN pip install --no-cache-dir --upgrade pip
 # installs from GitHub's main branch (see pyproject.toml's structure
 # extra) since its last PyPI release doesn't import on Python 3.10+ at all.
 #
-# allin1 installs fine here, but doesn't actually *work* yet: its DiNAT
-# model imports natten functions (natten1dav, natten1dqkrpb, ...) that
-# were removed from every current natten release, and natten's own old
-# releases never shipped Linux wheels (always compiled from source
-# against whatever torch is installed) -- so there's no version of
-# natten that's both installable against current torch *and* has the
-# API allin1's code expects. See README's "Known issues": `pianobot
-# structure` will fail clearly rather than silently misbehave, and
-# fixing this for real needs matching allin1/natten/torch to whatever
-# versions were current when allin1 was released (~mid-2023), which
-# will pull torch backwards for every extra sharing this environment --
-# a real tradeoff, not something to do by default.
+# allin1's shipped DiNAT model imports natten functions (natten1dav,
+# natten1dqkrpb, ...) that were removed from every current natten
+# release, and natten's own old releases never shipped Linux wheels
+# (always compiled from source against whatever torch is installed) --
+# so there's no version of natten that's both installable against
+# current torch *and* has the API allin1's code expects. Rather than
+# pin torch backwards for every extra sharing this environment, we
+# patch allin1 to not need natten at all -- see patches/allin1/README.md.
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir \
         numpy cython soundfile "pretty_midi>=0.2.10" typer rich pytest \
     && pip install --no-cache-dir --no-build-isolation vamp \
     && pip install --no-cache-dir --no-build-isolation "madmom @ git+https://github.com/CPJKU/madmom.git" \
     && pip install --no-cache-dir demucs basic-pitch allin1
+
+# Patch allin1 to make natten optional (see patches/allin1/README.md for
+# what/why -- an unmerged upstream fix, vendored here rather than
+# installed from that PR's branch directly since a personal fork branch
+# could vanish at any time). Located via `pip show` rather than
+# `import allin1`, since that import is exactly what's broken pre-patch.
+COPY patches/allin1/natten_torch.py patches/allin1/dinat.py /tmp/allin1-patch/
+RUN ALLIN1_DIR=$(pip show allin1 | grep '^Location:' | cut -d' ' -f2)/allin1/models \
+    && cp /tmp/allin1-patch/natten_torch.py /tmp/allin1-patch/dinat.py "$ALLIN1_DIR/" \
+    && rm -rf /tmp/allin1-patch \
+    && python -c "import allin1; from allin1 import analyze"  # fails the build loudly if the patch ever stops applying
 
 # --- Our own package ---------------------------------------------------------
 # Copied and installed last (and with --no-deps, since every real

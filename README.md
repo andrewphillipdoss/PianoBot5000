@@ -47,7 +47,7 @@ can import and call directly (`from pianobot import melody, chords, ...`).
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"          # core + pretty_midi/librosa/typer + pytest, no ML models yet
+pip install -e ".[dev]"          # core + pretty_midi/typer/rich + pytest, no ML models yet
 ```
 
 Each model stage is an optional extra, since they have very different
@@ -83,6 +83,34 @@ If you'd rather avoid the system-plugin step, `pianobot/chords.py` is
 written as a single-purpose module behind the same `ChordEvent`
 interface everything else consumes — swapping in `madmom` or another
 chord estimator later only means rewriting `extract_chords()`.
+
+### macOS install notes (especially Intel Macs)
+
+**Use Python 3.10, 3.11, or 3.12 — not 3.13 or 3.14.** PyTorch (needed
+by `stems`/Demucs and `structure`/allin1) dropped Intel-macOS (x86_64)
+wheels entirely after 2.2.2, and that last x86_64-compatible release
+only has wheels up to Python 3.12 — there is no working combination of
+newer Python + Intel Mac + torch. Apple Silicon Macs aren't affected by
+this specific issue, but 3.10-3.12 is still the safest bet for wheel
+coverage across the whole ML stack generally.
+
+Given that, `pip install -e ".[stems]"` / `".[structure]"` pin
+`torch<2.3` automatically on Intel Macs (via an environment marker in
+`pyproject.toml` — it's a no-op everywhere else), and `".[melody]"`
+pins `numba<0.63` for the same reason (numba also dropped Intel-macOS
+wheels in later releases; `basic-pitch` pulls it in transitively via
+`librosa`). You shouldn't need to do anything extra for either — just
+make sure your venv's Python is 3.10-3.12.
+
+**`vamp` (the `[chords]` extra) may fail with "Failed to build 'vamp'
+when getting requirements to build wheel."** Its `setup.py` imports
+`numpy` directly without declaring it as a build dependency, so pip's
+isolated build environment doesn't have it. Fix:
+```bash
+pip install --no-build-isolation vamp
+pip install -e ".[chords]"
+```
+(requires numpy already installed in your venv, which `".[dev]"` gives you).
 
 ## Usage
 

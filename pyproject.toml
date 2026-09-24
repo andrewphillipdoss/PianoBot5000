@@ -19,7 +19,7 @@ dependencies = [
 # Each pipeline stage's real model, isolated so a laptop install can be done
 # incrementally / per-stage instead of all-or-nothing.
 stems = ["demucs>=4.0"]
-melody = ["basic-pitch>=0.4"]
+melody = ["basic-pitch>=0.4", "numba<0.63"]  # numba>=0.63 dropped Intel-macOS wheels; basic-pitch->librosa pulls numba unpinned
 chords = ["vamp>=1.1.0"]
 structure = ["allin1>=0.1"]
 all = ["pianobot5000[stems,melody,chords,structure]"]

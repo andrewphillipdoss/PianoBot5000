@@ -5,40 +5,44 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pianobot5000"
 version = "0.1.0"
-description = "Song audio -> piano-arrangement MIDI file (melody + chord-voiced left hand + section markers)"
+description = "Chord/melody chart -> piano-arrangement MIDI file (melody + chord-voiced left hand + section markers)"
 requires-python = ">=3.10"
+# Deliberately small: this is everything `pianobot chart ...` (the
+# primary path -- see README) needs. No torch, no audio libraries,
+# nothing to compile -- a plain `pip install pianobot5000` is enough,
+# no Docker required. numpy/soundfile are only pulled in transitively
+# by the optional `transcribe` extras below.
 dependencies = [
-    "numpy>=1.24",
-    "soundfile>=0.12",
     "pretty_midi>=0.2.10",
     "typer>=0.12",
     "rich>=13.0",
 ]
 
 [project.optional-dependencies]
-# Each pipeline stage's real model, isolated so an install can be done
-# incrementally / per-stage instead of all-or-nothing. No version caps
-# here on purpose -- the supported way to run PianoBot5000 is the Linux
-# container in Dockerfile, where the full ML ecosystem (torch, numba,
-# tensorflow, ...) has current wheels for every one of these. The old
-# native-macOS workaround pins (numba<0.63, torch<2.3) lived here
-# briefly; they're gone now that the container is the real answer to
-# that problem instead of chasing version ceilings on a host OS.
-stems = ["demucs>=4.0"]
-melody = ["basic-pitch>=0.4"]
-chords = ["vamp>=1.1.0"]
+# Everything below is only for `pianobot transcribe ...`, the
+# optional (and heavier) audio-to-MIDI pipeline that guesses a chart
+# from a recording instead of starting from a known one -- see the
+# Dockerfile and README's "Transcribe mode" section. No version caps
+# here on purpose -- the supported way to run this half of the project
+# is the Linux container in Dockerfile, where the full ML ecosystem
+# (torch, numba, tensorflow, ...) has current wheels for every one of
+# these.
+transcribe-stems = ["demucs>=4.0", "numpy>=1.24", "soundfile>=0.12"]
+transcribe-melody = ["basic-pitch>=0.4"]
+transcribe-chords = ["vamp>=1.1.0"]
 # allin1 depends on madmom at runtime but never declares it (a real gap
 # in allin1's own packaging) -- declaring it here so `pip install
-# -e ".[structure]"` at least gets a complete dependency set. madmom's
-# own last PyPI release (0.16.1) doesn't import on Python 3.10+ at all
-# (uses `from collections import MutableSequence`, removed in 3.10),
-# so this pulls its fixed-but-never-released GitHub main branch instead.
-# Separately, allin1 also doesn't *import* successfully against any
-# natten release installable on current torch -- pyproject.toml alone
-# doesn't fix that (it's a code patch, not a dependency); see
-# patches/allin1/README.md and the Dockerfile for the actual fix.
-structure = ["allin1>=0.1", "madmom @ git+https://github.com/CPJKU/madmom.git"]
-all = ["pianobot5000[stems,melody,chords,structure]"]
+# -e ".[transcribe-structure]"` at least gets a complete dependency set.
+# madmom's own last PyPI release (0.16.1) doesn't import on Python
+# 3.10+ at all (uses `from collections import MutableSequence`,
+# removed in 3.10), so this pulls its fixed-but-never-released GitHub
+# main branch instead. Separately, allin1 also doesn't *import*
+# successfully against any natten release installable on current torch
+# -- pyproject.toml alone doesn't fix that (it's a code patch, not a
+# dependency); see patches/allin1/README.md and the Dockerfile for the
+# actual fix.
+transcribe-structure = ["allin1>=0.1", "madmom @ git+https://github.com/CPJKU/madmom.git"]
+transcribe = ["pianobot5000[transcribe-stems,transcribe-melody,transcribe-chords,transcribe-structure]"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

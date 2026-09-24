@@ -135,3 +135,31 @@ class SongAnalysis:
     sections: list[Section] = field(default_factory=list)  # every detected song section (verse, chorus, ...), in time order
     melody_notes: list[NoteEvent] = field(default_factory=list)  # the cleaned-up, single-note-at-a-time melody line
     chords: list[ChordEvent] = field(default_factory=list)  # every detected chord, snapped to the beat grid
+
+
+@dataclass
+class Chart:
+    """A hand-authored (or imported) lead sheet: chords over time +
+    melody over time, in a known key -- the input to the chart-based
+    path (see pianobot.charts), as opposed to SongAnalysis above, which
+    is what comes out the *other* end of the audio-transcription path.
+
+    Important: every time value here (chord/note/section start and
+    end) is in **beats** from the start of the chart, not seconds --
+    e.g. a chord starting on the downbeat of bar 2 (in 4/4) has
+    start=4.0, regardless of tempo. This is deliberate: a chart is a
+    piece of notation, not a recording, so it shouldn't need to know
+    its own tempo to describe *where* something happens -- only *when
+    in real time* that is depends on tempo, and that conversion only
+    needs to happen once, right before writing the MIDI file (see
+    ``pianobot.charts.arrange``). It also makes transposing a chart
+    (``pianobot.charts.transpose``) a pure pitch operation, with no
+    timing math involved at all.
+    """
+
+    title: str  # e.g. "Autumn Leaves"
+    key: str  # the key this chart is written in, e.g. "C", "Eb", "F#" -- see theory.PITCH_CLASSES for accepted spellings
+    tempo: float  # BPM to use when rendering this chart to MIDI (a chart itself has no fixed tempo requirement beyond this default)
+    sections: list[Section] = field(default_factory=list)  # song form (verse/chorus/...), start/end in beats
+    chords: list[ChordEvent] = field(default_factory=list)  # the chord changes, start/end in beats
+    melody: list[NoteEvent] = field(default_factory=list)  # the melody line, start/end in beats

@@ -22,7 +22,7 @@ from __future__ import annotations
 import string
 from pathlib import Path
 
-from .types import Beat, Section
+from ..types import Beat, Section
 
 
 class Allin1Unavailable(RuntimeError):

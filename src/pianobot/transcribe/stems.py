@@ -34,7 +34,7 @@ from pathlib import Path
 
 # The `.` means "from this same package" -- i.e. from types.py, which
 # sits right next to this file inside the pianobot/ folder.
-from .types import StemSet
+from ..types import StemSet
 
 _MODEL = "htdemucs"  # the specific Demucs model to use; "htdemucs" splits audio into 4 stems: vocals, drums, bass, other
 _STEM_NAMES = ("vocals", "drums", "bass", "other")  # the filenames (minus ".wav") Demucs writes out for that model

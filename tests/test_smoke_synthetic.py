@@ -27,7 +27,8 @@ import pretty_midi
 # equality instead of requiring an exact match, which floats rarely give.
 import pytest
 
-from pianobot import assemble, chords, melody, structure
+from pianobot import assemble, theory
+from pianobot.transcribe import chords, melody, structure
 from pianobot.types import Beat, ChordEvent, NoteEvent, Section
 
 
@@ -94,7 +95,7 @@ def test_chord_snapping_and_voicing():
     assert snapped[0].start == pytest.approx(0.0)
     assert snapped[1].root_pitch_class == 9
 
-    triads = chords.voice_triads(snapped)
+    triads = theory.voice_triads(snapped)
     # each chord contributes exactly 3 notes (root, third, fifth).
     assert len(triads) == 3 * len(snapped)
     # Pull out just the notes belonging to the first (C major) chord

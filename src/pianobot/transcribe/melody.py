@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .types import Beat, NoteEvent
+from ..types import Beat, NoteEvent
 
 
 class BasicPitchUnavailable(RuntimeError):

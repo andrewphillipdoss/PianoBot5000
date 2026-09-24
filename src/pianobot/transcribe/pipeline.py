@@ -44,8 +44,9 @@ import soundfile as sf
 
 # Import our own sibling modules -- each one is one stage of the
 # pipeline, as described in the module docstring above.
-from . import assemble, chords, melody, stems, structure
-from .types import Beat, ChordEvent, NoteEvent, Section, SongAnalysis
+from .. import assemble
+from ..types import Beat, ChordEvent, NoteEvent, Section, SongAnalysis
+from . import chords, melody, stems, structure
 
 
 def analysis_dir_for(work_dir: Path) -> Path:

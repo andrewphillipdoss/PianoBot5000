@@ -1,7 +1,11 @@
-# PianoBot5000 -- containerized so the whole ML stack (Demucs/torch,
-# Basic Pitch, allin1, Chordino) runs on current, fully-supported
-# dependency versions regardless of the host machine's OS/CPU
-# architecture. See README.md's "Running via Docker" section.
+# PianoBot5000 -- TRANSCRIBE MODE ONLY (`pianobot transcribe ...`).
+# The project's primary path (`pianobot chart ...`) needs none of
+# this -- a plain `pip install pianobot5000` is enough, no Docker at
+# all. This image exists only for the optional audio-to-MIDI mode,
+# containerized so the whole ML stack (Demucs/torch, Basic Pitch,
+# allin1, Chordino) runs on current, fully-supported dependency
+# versions regardless of the host machine's OS/CPU architecture. See
+# README.md's "Transcribe mode" section.
 FROM python:3.11-slim
 
 # System packages:

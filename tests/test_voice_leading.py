@@ -1,6 +1,8 @@
-"""Tests for chords.py's inversion-choosing voice leading in
+"""Tests for theory.py's inversion-choosing voice leading in
 voice_triads(), plus its two small pure helpers (_stack_close_position,
-_centroid).
+_centroid). This logic is shared by both the chart-based path and the
+audio-transcription path, so it lives in theory.py rather than either
+one specifically.
 
 Beginner note: "voice leading" is the music-theory term for choosing,
 among several equally-correct ways to voice a chord, whichever one
@@ -11,7 +13,7 @@ root position.
 
 from __future__ import annotations
 
-from pianobot.chords import _centroid, _stack_close_position, voice_triads
+from pianobot.theory import _centroid, _stack_close_position, voice_triads
 from pianobot.types import ChordEvent
 
 

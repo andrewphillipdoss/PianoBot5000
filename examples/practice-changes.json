@@ -1,0 +1,49 @@
+{
+  "title": "Practice Changes (I-vi-ii-V, 8 bars)",
+  "key": "C",
+  "tempo": 96,
+  "sections": [
+    {"label": "A", "start_beat": 0, "end_beat": 32}
+  ],
+  "chords": [
+    {"beat": 0, "duration_beats": 4, "chord": "Cmaj7"},
+    {"beat": 4, "duration_beats": 4, "chord": "Am7"},
+    {"beat": 8, "duration_beats": 4, "chord": "Dm7"},
+    {"beat": 12, "duration_beats": 4, "chord": "G7"},
+    {"beat": 16, "duration_beats": 4, "chord": "Cmaj7"},
+    {"beat": 20, "duration_beats": 4, "chord": "Am7"},
+    {"beat": 24, "duration_beats": 4, "chord": "Dm7"},
+    {"beat": 28, "duration_beats": 4, "chord": "G7"}
+  ],
+  "melody": [
+    {"beat": 0, "duration_beats": 1, "pitch": "C4"},
+    {"beat": 1, "duration_beats": 1, "pitch": "E4"},
+    {"beat": 2, "duration_beats": 1, "pitch": "G4"},
+    {"beat": 3, "duration_beats": 1, "pitch": "B4"},
+    {"beat": 4, "duration_beats": 1, "pitch": "A3"},
+    {"beat": 5, "duration_beats": 1, "pitch": "C4"},
+    {"beat": 6, "duration_beats": 1, "pitch": "E4"},
+    {"beat": 7, "duration_beats": 1, "pitch": "G4"},
+    {"beat": 8, "duration_beats": 1, "pitch": "D4"},
+    {"beat": 9, "duration_beats": 1, "pitch": "F4"},
+    {"beat": 10, "duration_beats": 1, "pitch": "A4"},
+    {"beat": 11, "duration_beats": 1, "pitch": "C5"},
+    {"beat": 12, "duration_beats": 1, "pitch": "G3"},
+    {"beat": 13, "duration_beats": 1, "pitch": "B3"},
+    {"beat": 14, "duration_beats": 1, "pitch": "D4"},
+    {"beat": 15, "duration_beats": 1, "pitch": "F4"},
+    {"beat": 16, "duration_beats": 1, "pitch": "C4"},
+    {"beat": 17, "duration_beats": 1, "pitch": "E4"},
+    {"beat": 18, "duration_beats": 1, "pitch": "G4"},
+    {"beat": 19, "duration_beats": 1, "pitch": "B4"},
+    {"beat": 20, "duration_beats": 1, "pitch": "A3"},
+    {"beat": 21, "duration_beats": 1, "pitch": "C4"},
+    {"beat": 22, "duration_beats": 1, "pitch": "E4"},
+    {"beat": 23, "duration_beats": 1, "pitch": "G4"},
+    {"beat": 24, "duration_beats": 1, "pitch": "D4"},
+    {"beat": 25, "duration_beats": 1, "pitch": "F4"},
+    {"beat": 26, "duration_beats": 1, "pitch": "A4"},
+    {"beat": 27, "duration_beats": 1, "pitch": "C5"},
+    {"beat": 28, "duration_beats": 4, "pitch": "G3"}
+  ]
+}

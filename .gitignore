@@ -7,3 +7,8 @@ __pycache__/
 *.mid
 build/
 dist/
+
+# Downloaded Vamp plugin binaries for the Docker build -- see
+# vamp-plugins/README.md. The README itself is tracked.
+vamp-plugins/*
+!vamp-plugins/README.md

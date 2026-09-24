@@ -1,0 +1,87 @@
+# PianoBot5000 -- containerized so the whole ML stack (Demucs/torch,
+# Basic Pitch, allin1, Chordino) runs on current, fully-supported
+# dependency versions regardless of the host machine's OS/CPU
+# architecture. See README.md's "Running via Docker" section.
+FROM python:3.11-slim
+
+# System packages:
+#   ffmpeg        -- Demucs uses it for audio I/O
+#   libsndfile1   -- runtime library `soundfile` (Python) links against
+#   build-essential -- `vamp` (chords) and `madmom` (structure) only ship
+#                    source distributions on PyPI, never prebuilt wheels,
+#                    so a C++ compiler is required to install either, on
+#                    any platform
+#   git           -- structure's madmom pin installs from GitHub (see below)
+#   ca-certificates -- TLS roots, for pip installs and model-weight downloads
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libsndfile1 \
+        build-essential \
+        git \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+RUN pip install --no-cache-dir --upgrade pip
+
+# --- Heavy dependency layer -------------------------------------------------
+# Installed by bare package name (not `pip install -e .`) so this slow,
+# multi-GB layer is cached independently of our own source code -- editing
+# melody.py shouldn't force Demucs/PyTorch/TensorFlow to redownload.
+# If you change version constraints in pyproject.toml's [project.optional-
+# dependencies], update this list to match.
+#
+# CPU-only torch build explicitly (PyTorch's own official CPU wheel index):
+# plain `pip install torch` on Linux otherwise pulls a much larger build
+# bundling CUDA libraries this container has no GPU to use (~555MB vs
+# ~150-200MB).
+#
+# `vamp` and `madmom` both need --no-build-isolation: their setup.py
+# imports numpy/Cython directly without declaring them as *build*
+# dependencies, so pip's normal isolated build environment doesn't have
+# them -- this makes them build against what's already installed above
+# instead (hence `cython` in the line below, alongside numpy). madmom
+# installs from GitHub's main branch (see pyproject.toml's structure
+# extra) since its last PyPI release doesn't import on Python 3.10+ at all.
+#
+# allin1 installs fine here, but doesn't actually *work* yet: its DiNAT
+# model imports natten functions (natten1dav, natten1dqkrpb, ...) that
+# were removed from every current natten release, and natten's own old
+# releases never shipped Linux wheels (always compiled from source
+# against whatever torch is installed) -- so there's no version of
+# natten that's both installable against current torch *and* has the
+# API allin1's code expects. See README's "Known issues": `pianobot
+# structure` will fail clearly rather than silently misbehave, and
+# fixing this for real needs matching allin1/natten/torch to whatever
+# versions were current when allin1 was released (~mid-2023), which
+# will pull torch backwards for every extra sharing this environment --
+# a real tradeoff, not something to do by default.
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir \
+        numpy cython soundfile "pretty_midi>=0.2.10" typer rich pytest \
+    && pip install --no-cache-dir --no-build-isolation vamp \
+    && pip install --no-cache-dir --no-build-isolation "madmom @ git+https://github.com/CPJKU/madmom.git" \
+    && pip install --no-cache-dir demucs basic-pitch allin1
+
+# --- Our own package ---------------------------------------------------------
+# Copied and installed last (and with --no-deps, since every real
+# dependency was already installed above) so this fast layer is the only
+# one that reruns on an ordinary source-code change.
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir --no-deps -e .
+COPY tests ./tests
+
+# --- Chordino (NNLS Chroma) ---------------------------------------------------
+# A compiled Vamp plugin binary, not a pip package. Download the Linux
+# build yourself from https://www.vamp-plugins.org/download.html#nnls-chroma
+# and place its files under ./vamp-plugins/ (next to this Dockerfile,
+# .gitignored, not committed) before running `docker build` -- see
+# vamp-plugins/README.md. Everything there is copied into the image's
+# Vamp plugin search path; if you skip this step, `chords`/`pianobot
+# chords` will just report the plugin isn't installed, same as on a
+# native machine.
+RUN mkdir -p /usr/local/lib/vamp
+COPY vamp-plugins/ /usr/local/lib/vamp/
+
+CMD ["pianobot", "--help"]

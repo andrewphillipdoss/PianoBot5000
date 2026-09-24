@@ -16,17 +16,26 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Each pipeline stage's real model, isolated so a laptop install can be done
-# incrementally / per-stage instead of all-or-nothing.
-# The `torch<2.3` lines only apply on Intel Macs (torch dropped x86_64
-# macOS wheels entirely starting at 2.3.0 -- every later release is
-# Apple Silicon/Linux/Windows only); the marker means this constraint
-# is simply ignored everywhere else, so it doesn't hold other platforms
-# back from newer torch.
-stems = ["demucs>=4.0", "torch<2.3; sys_platform == 'darwin' and platform_machine == 'x86_64'"]
-melody = ["basic-pitch>=0.4", "numba<0.63"]  # numba>=0.63 dropped Intel-macOS wheels; basic-pitch->librosa pulls numba unpinned
+# Each pipeline stage's real model, isolated so an install can be done
+# incrementally / per-stage instead of all-or-nothing. No version caps
+# here on purpose -- the supported way to run PianoBot5000 is the Linux
+# container in Dockerfile, where the full ML ecosystem (torch, numba,
+# tensorflow, ...) has current wheels for every one of these. The old
+# native-macOS workaround pins (numba<0.63, torch<2.3) lived here
+# briefly; they're gone now that the container is the real answer to
+# that problem instead of chasing version ceilings on a host OS.
+stems = ["demucs>=4.0"]
+melody = ["basic-pitch>=0.4"]
 chords = ["vamp>=1.1.0"]
-structure = ["allin1>=0.1", "torch<2.3; sys_platform == 'darwin' and platform_machine == 'x86_64'"]
+# allin1 depends on madmom at runtime but never declares it (a real gap
+# in allin1's own packaging) -- declaring it here so `pip install
+# -e ".[structure]"` at least gets a complete dependency set. madmom's
+# own last PyPI release (0.16.1) doesn't import on Python 3.10+ at all
+# (uses `from collections import MutableSequence`, removed in 3.10),
+# so this pulls its fixed-but-never-released GitHub main branch instead
+# -- see README's "Known issues" for the *separate*, still-open
+# natten/DiNAT incompatibility this doesn't fix.
+structure = ["allin1>=0.1", "madmom @ git+https://github.com/CPJKU/madmom.git"]
 all = ["pianobot5000[stems,melody,chords,structure]"]
 dev = ["pytest>=8.0"]
 

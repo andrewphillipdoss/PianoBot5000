@@ -21,6 +21,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from . import assemble as assemble_stage
 from .charts import musicxml_format, simple_format
@@ -75,7 +76,11 @@ def _load_chart(chart_file: Path) -> Chart:
         try:
             return musicxml_format.load_chart(chart_file)
         except musicxml_format.Music21Unavailable as exc:
-            console.print(f"[red]Can't read a MusicXML chart:[/red] {exc}")
+            # `escape()` guards against Rich's markup parser silently
+            # eating literal square brackets in the exception's own
+            # message (e.g. "pip install 'pianobot5000[charts-musicxml]'")
+            # -- it looks exactly like a (nonexistent) style tag otherwise.
+            console.print(f"[red]Can't read a MusicXML chart:[/red] {escape(str(exc))}")
             raise typer.Exit(code=1) from exc
     return simple_format.load_chart(chart_file)
 

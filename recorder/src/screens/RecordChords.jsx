@@ -14,7 +14,7 @@ import './shared.css';
  * actually beat-synced would just be misleading.
  */
 export default function RecordChords({ title, sectionLabel, tempo, onBack, onDone }) {
-  const { phase, result, start, stop, handleMidiMessage } = useRecordingSession({ tempo, mode: 'chords' });
+  const { phase, result, error, start, stop, handleMidiMessage } = useRecordingSession({ tempo, mode: 'chords' });
   const midi = useMidi();
 
   // Feed the shared MIDI stream into this screen's recording session
@@ -59,6 +59,11 @@ export default function RecordChords({ title, sectionLabel, tempo, onBack, onDon
       )}
       {midi.status === 'granted' && midi.inputs.length === 0 && (
         <div className="panel">No MIDI input found -- check your keyboard/interface is plugged in.</div>
+      )}
+      {error && (
+        <div className="panel" style={{ borderColor: 'var(--live)', color: 'var(--live)' }}>
+          Couldn't make sense of that take -- {error.message}. Press Space (or click) to try the section again.
+        </div>
       )}
 
       {midi.inputs.length === 1 && (

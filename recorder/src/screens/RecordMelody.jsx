@@ -13,7 +13,7 @@ import './shared.css';
  * length is already fixed).
  */
 export default function RecordMelody({ title, sectionLabel, tempo, chordsResult, onBack, onDone }) {
-  const { phase, result, start, restart, handleMidiMessage } = useRecordingSession({ tempo, mode: 'melody' });
+  const { phase, result, error, start, restart, handleMidiMessage } = useRecordingSession({ tempo, mode: 'melody' });
   const midi = useMidi();
 
   useEffect(() => midi.subscribe(handleMidiMessage), [midi, handleMidiMessage]);
@@ -40,6 +40,12 @@ export default function RecordMelody({ title, sectionLabel, tempo, chordsResult,
         <a href="#" className="screen__back" onClick={(e) => { e.preventDefault(); onBack(); }}>&larr; Chords</a>
         <h1 style={{ fontSize: 26, marginTop: 6 }}>{title} &mdash; Section {sectionLabel} &mdash; Melody</h1>
       </div>
+
+      {error && (
+        <div className="panel" style={{ borderColor: 'var(--live)', color: 'var(--live)' }}>
+          Couldn't make sense of that take -- {error.message}. Press Space (or click) to try the section again.
+        </div>
+      )}
 
       {midi.inputs.length === 1 && (
         <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Connected: {midi.inputs[0].name}</span>

@@ -68,6 +68,39 @@ describe('RecordingSession (chords mode)', () => {
     session.stop(); // too early -- still counting in
     expect(session.phase).toBe('countIn');
   });
+
+  it('an unrecognizable chord calls onError (not onDone) and drops back to idle, not a stuck "done"', async () => {
+    let error = null;
+    let doneCalled = false;
+    const phases = [];
+    const session = new RecordingSession({
+      tempo: FAST_TEMPO,
+      mode: 'chords',
+      onPhaseChange: (p) => phases.push(p),
+      onDone: () => {
+        doneCalled = true;
+      },
+      onError: (e) => {
+        error = e;
+      },
+    });
+    session.start();
+    await wait(80);
+    expect(session.phase).toBe('capturing');
+
+    // Two notes a whole step apart isn't a recognizable triad or 7th.
+    session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 60, velocity: 90 });
+    session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 62, velocity: 90 });
+
+    await wait(20);
+    session.stop();
+
+    expect(doneCalled).toBe(false);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toMatch(/couldn't recognize a chord/);
+    expect(session.phase).toBe('idle'); // not stuck on 'done' with no result
+    expect(phases.at(-1)).toBe('idle');
+  });
 });
 
 describe('RecordingSession (melody mode)', () => {
@@ -98,7 +131,7 @@ describe('RecordingSession (melody mode)', () => {
   it('restart() discards the in-progress take and begins a fresh count-in', async () => {
     const phases = [];
     const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'melody', onPhaseChange: (p) => phases.push(p) });
-    session.start({ chords: [], sectionLengthBeats: 4 });
+    session.start({ chords: [], sectionLengthBeats: 20 }); // comfortable margin before auto-finish -- see the auto-finish test above for why a short window here races
     await wait(80);
     expect(session.phase).toBe('capturing');
     session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 60, velocity: 90 });

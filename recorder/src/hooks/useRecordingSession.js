@@ -17,6 +17,7 @@ import { RecordingSession } from '../recordingSession.js';
 export function useRecordingSession({ tempo, mode }) {
   const [phase, setPhase] = useState('idle');
   const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
   const sessionRef = useRef(null);
 
   // Lazy ref-singleton init -- React's own documented pattern for
@@ -25,13 +26,14 @@ export function useRecordingSession({ tempo, mode }) {
   // Some lint rules flag any ref access during render on principle;
   // this specific shape is the sanctioned exception.
   if (!sessionRef.current) {
-    sessionRef.current = new RecordingSession({ tempo, mode, onPhaseChange: setPhase, onDone: setResult });
+    sessionRef.current = new RecordingSession({ tempo, mode, onPhaseChange: setPhase, onDone: setResult, onError: setError });
   }
 
   useEffect(() => () => sessionRef.current?.cancel(), []);
 
   const start = useCallback(async (options) => {
     setResult(null);
+    setError(null);
     await enableAudio(); // starting a pass is itself a user gesture (a click or spacebar) -- the right moment to unlock audio
     sessionRef.current.start(options);
   }, []);
@@ -40,10 +42,11 @@ export function useRecordingSession({ tempo, mode }) {
 
   const restart = useCallback(() => {
     setResult(null);
+    setError(null);
     sessionRef.current.restart();
   }, []);
 
   const handleMidiMessage = useCallback((message) => sessionRef.current?.handleMidiMessage(message), []);
 
-  return { phase, result, start, stop, restart, handleMidiMessage };
+  return { phase, result, error, start, stop, restart, handleMidiMessage };
 }

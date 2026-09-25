@@ -37,13 +37,19 @@ export class RecordingSession {
    * @param {'chords'|'melody'} options.mode
    * @param {(phase: string) => void} [options.onPhaseChange]
    * @param {(result: object) => void} [options.onDone]
+   * @param {(error: Error) => void} [options.onError] - fires instead of
+   *   onDone when the just-captured take can't be turned into a result
+   *   (chords mode: detectChords() rejecting an unrecognizable cluster of
+   *   held notes -- see theory.js). Phase drops back to 'idle' so the
+   *   player can just hit record again.
    */
-  constructor({ tempo, mode, onPhaseChange, onDone }) {
+  constructor({ tempo, mode, onPhaseChange, onDone, onError }) {
     this.tempo = tempo;
     this.mode = mode;
     this.secondsPerBeat = 60 / tempo;
     this.onPhaseChange = onPhaseChange ?? (() => {});
     this.onDone = onDone ?? (() => {});
+    this.onError = onError ?? (() => {});
     this.phase = 'idle'; // idle | countIn | capturing | done
     this._resetPassState();
   }
@@ -159,14 +165,25 @@ export class RecordingSession {
     clearInterval(this._scheduleIntervalId);
     clearTimeout(this._captureEndTimeoutId);
     stopAllNotes();
-    this._setPhase('done');
 
-    const result =
-      this.mode === 'chords'
-        ? processChordsPass(this.bufferedMessages, this.tempo, chordsCaptureDurationSeconds)
-        : processMelodyPass(this.bufferedMessages, this.tempo, this.sectionLengthBeats);
+    let result;
+    try {
+      result =
+        this.mode === 'chords'
+          ? processChordsPass(this.bufferedMessages, this.tempo, chordsCaptureDurationSeconds)
+          : processMelodyPass(this.bufferedMessages, this.tempo, this.sectionLengthBeats);
+    } catch (error) {
+      // A bad take (e.g. an unrecognizable chord) isn't a bug -- drop
+      // back to idle so the player can just record it again, rather
+      // than leaving the screen stuck in a 'done' phase nothing
+      // renders for.
+      this._setPhase('idle');
+      this.onError(error);
+      return;
+    }
 
     this.result = result;
+    this._setPhase('done');
     this.onDone(result);
   }
 

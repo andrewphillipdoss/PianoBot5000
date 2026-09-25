@@ -21,6 +21,26 @@ describe('processChordsPass', () => {
     expect(sectionLengthBeats).toBe(16); // 8 real beats rounds up to one 4-bar (16-beat) unit
   });
 
+  it('still recognizes a rolled chord whose notes quantize onto adjacent 16th-note grid points', () => {
+    // A real, natural hand roll -- C3/E3 struck together, G3 landing
+    // ~0.15 beats later (75ms at this tempo, an ordinary chord attack
+    // spread, not sloppy playing). Quantizing each note independently
+    // to the 16th-note grid pushes C3/E3 to beat 4.00 and G3 to the
+    // *next* grid point, beat 4.25 -- if the cluster threshold can't
+    // bridge that one grid step, this correctly-played chord gets
+    // fragmented into two unrecognizable partial clusters and throws.
+    const messages = [
+      { timestamp: 4.05 * SPB, type: 'noteon', note: 48, velocity: 90 }, // C3
+      { timestamp: 4.05 * SPB, type: 'noteon', note: 52, velocity: 90 }, // E3
+      { timestamp: 4.2 * SPB, type: 'noteon', note: 55, velocity: 90 }, // G3, rolled in slightly late
+      { timestamp: 5 * SPB, type: 'noteoff', note: 48, velocity: 0 },
+      { timestamp: 5 * SPB, type: 'noteoff', note: 52, velocity: 0 },
+      { timestamp: 5 * SPB, type: 'noteoff', note: 55, velocity: 0 },
+    ];
+    const { chords } = processChordsPass(messages, TEMPO, 8 * SPB);
+    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', start: 4, end: 5 }]);
+  });
+
   it('trims trailing dead air before rounding, using the true capture duration -- not the last note-off', () => {
     const messages = [
       { timestamp: 0, type: 'noteon', note: 48, velocity: 90 }, // C3 -- C major, beat 0

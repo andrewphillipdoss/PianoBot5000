@@ -10,6 +10,20 @@ import { detectChords, messagesToNotes, quantizeNotes, roundToBarInterval, secon
 
 export const BEATS_PER_BAR = 4;
 
+// Notes are quantized onto a 16th-note grid (quantizeNotes' own default,
+// 4 subdivisions/beat = 0.25 beats/step) before chord clustering ever
+// sees them. A cluster threshold smaller than that grid step is a real
+// bug, not just tight: two notes struck genuinely together can still
+// round to *adjacent* grid points (rounding can push them up to half a
+// step apart each, so up to a full step apart from each other), and a
+// threshold that can't bridge one grid step will then see them as two
+// separate, unrecognizable partial chords instead of one real one.
+// 0.35 clears that with real margin left over for an actual hand roll,
+// while still being tight enough not to smear together a genuinely fast
+// chord change.
+const QUANTIZE_SUBDIVISIONS_PER_BEAT = 4;
+const CHORD_CLUSTER_THRESHOLD_BEATS = 0.35;
+
 /**
  * A completed chords pass -> { chords, sectionLengthBeats }. The
  * chords pass is authoritative for a section's length (see this
@@ -30,8 +44,8 @@ export function processChordsPass(rawMessages, tempo, captureDurationSeconds) {
   // endTimestamp = the capture boundary itself, so a chord still held
   // when stop() was pressed (the normal case) closes there instead of
   // being dropped for never getting an explicit note-off.
-  const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo));
-  const chords = detectChords(notes);
+  const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), QUANTIZE_SUBDIVISIONS_PER_BEAT);
+  const chords = detectChords(notes, CHORD_CLUSTER_THRESHOLD_BEATS);
 
   const rawTotalBeats = captureDurationSeconds * (tempo / 60);
   const trimmedBeats = trimTrailingEmptyBars(rawTotalBeats, chords.map((c) => c.start), BEATS_PER_BAR);
@@ -52,7 +66,7 @@ export function processMelodyPass(rawMessages, tempo, sectionLengthBeats) {
   // Same reasoning as processChordsPass: a melody note still held
   // when playback auto-stops should close there, not vanish.
   const captureDurationSeconds = sectionLengthBeats * (60 / tempo);
-  const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo))
+  const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), QUANTIZE_SUBDIVISIONS_PER_BEAT)
     .filter((n) => n.start < sectionLengthBeats)
     .map((n) => ({ ...n, end: Math.min(n.end, sectionLengthBeats) }))
     // Clipping to the boundary above can turn a note that quantized

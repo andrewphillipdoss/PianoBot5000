@@ -1,15 +1,31 @@
+import { useEffect, useRef, useState } from 'react';
 import { useMidiInput } from '../hooks/useMidiInput.js';
+import { enableAudio, playNote, stopNote } from '../pianoSynth.js';
 import { midiNoteName } from '../theory.js';
 import './MidiTest.css';
 
 /**
  * A diagnostic screen, not a real app screen: pick a MIDI input, see
- * every note you play show up live. This exists to answer one
- * question -- "does this browser actually see my keyboard?" -- before
- * any real recording UI gets built on top of Web MIDI.
+ * (and hear) every note you play show up live. This exists to answer
+ * one question -- "does this browser actually see my keyboard?" --
+ * before any real recording UI gets built on top of Web MIDI.
  */
 export default function MidiTest() {
   const { supported, status, error, inputs, selectedInputId, setSelectedInputId, events, heldNotes } = useMidiInput();
+  const [soundOn, setSoundOn] = useState(false);
+  const lastPlayedEventId = useRef(0);
+
+  // Reacts to the live event stream to trigger sound -- deliberately
+  // separate from useMidiInput itself, which stays a generic
+  // MIDI-in-to-events hook with no audio-playback opinion baked in.
+  useEffect(() => {
+    if (!soundOn || events.length === 0) return;
+    const newest = events[0];
+    if (newest.id <= lastPlayedEventId.current) return;
+    lastPlayedEventId.current = newest.id;
+    if (newest.type === 'noteon' && newest.velocity > 0) playNote(newest.note, newest.velocity);
+    else stopNote(newest.note);
+  }, [events, soundOn]);
 
   if (!supported) {
     return (
@@ -42,6 +58,17 @@ export default function MidiTest() {
       {status === 'granted' && inputs.length > 0 && (
         <div className="midi-test__status midi-test__status--ok">MIDI access granted -- {inputs.length} input port(s) found.</div>
       )}
+
+      <div className="midi-test__panel">
+        <span className="midi-test__panel-label">Sound feedback</span>
+        <button
+          className="midi-test__select"
+          onClick={() => enableAudio().then(() => setSoundOn(true))}
+          disabled={soundOn}
+        >
+          {soundOn ? 'Sound on' : 'Enable sound'}
+        </button>
+      </div>
 
       {inputs.length > 0 && (
         <div className="midi-test__panel">

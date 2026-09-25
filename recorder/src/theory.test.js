@@ -4,11 +4,25 @@ import {
   detectChordQuality,
   detectChords,
   messagesToNotes,
+  midiNoteName,
   quantizeNotes,
   roundToBarInterval,
   secondsToBeats,
   trimTrailingEmptyBars,
 } from './theory.js';
+
+describe('midiNoteName', () => {
+  it('names middle C (60) as C4, per MIDI convention', () => {
+    expect(midiNoteName(60)).toBe('C4');
+  });
+
+  it('names other pitches correctly, sharps only', () => {
+    expect(midiNoteName(61)).toBe('C#4');
+    expect(midiNoteName(69)).toBe('A4'); // concert A
+    expect(midiNoteName(21)).toBe('A0'); // lowest note on an 88-key piano
+    expect(midiNoteName(108)).toBe('C8'); // highest note on an 88-key piano
+  });
+});
 
 describe('detectChordQuality', () => {
   it('recognizes a root-position major triad', () => {

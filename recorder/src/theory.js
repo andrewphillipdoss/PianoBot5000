@@ -20,6 +20,14 @@ export const TRIAD_INTERVALS = {
   aug: [0, 4, 8],
 };
 
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+/** MIDI pitch number -> note name, e.g. 60 -> "C4" (MIDI's own convention: middle C = C4). */
+export function midiNoteName(pitch) {
+  const octave = Math.floor(pitch / 12) - 1;
+  return `${NOTE_NAMES[pitch % 12]}${octave}`;
+}
+
 /**
  * The reverse of chord voicing: given the pitch classes actually
  * played (0-11, octave-independent) plus optionally which one was the

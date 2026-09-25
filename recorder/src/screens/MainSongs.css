@@ -50,9 +50,16 @@
 .song-table__head,
 .song-row {
   display: grid;
-  grid-template-columns: 2.4fr 0.7fr 0.9fr 1fr 1.1fr;
+  grid-template-columns: minmax(0, 2.4fr) 0.7fr 0.9fr 1fr 1.1fr;
+  gap: 12px;
   padding: 14px 20px;
   align-items: center;
+}
+
+.song-row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .song-table__head {

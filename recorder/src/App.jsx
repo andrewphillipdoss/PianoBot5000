@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import MainSongs from './screens/MainSongs.jsx';
+import MidiTest from './screens/MidiTest.jsx';
 
 // Placeholder data matching the design wireframe, until real song
 // storage (via the File System Access API) is wired up -- see
@@ -12,12 +14,30 @@ const PLACEHOLDER_SONGS = [
   { title: 'Georgia on My Mind', key: 'G', tempo: 66, sectionLabels: ['A (chords only)'], updatedAt: '1 month ago' },
 ];
 
+// Temporary until real routing/screens exist -- lets the MIDI
+// diagnostic screen be reached without losing the "My Songs" screen.
 export default function App() {
+  const [screen, setScreen] = useState('songs');
+
   return (
-    <MainSongs
-      songs={PLACEHOLDER_SONGS}
-      onAddSong={() => console.log('add a song (recording flow not built yet)')}
-      onOpenSong={(song) => console.log('open song', song)}
-    />
+    <div>
+      <div style={{ display: 'flex', gap: 16, padding: '12px 40px 0', fontSize: 13 }}>
+        <button onClick={() => setScreen('songs')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: screen === 'songs' ? 'var(--accent-dark)' : 'var(--ink-soft)', fontWeight: screen === 'songs' ? 600 : 400 }}>
+          My Songs
+        </button>
+        <button onClick={() => setScreen('midi-test')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: screen === 'midi-test' ? 'var(--accent-dark)' : 'var(--ink-soft)', fontWeight: screen === 'midi-test' ? 600 : 400 }}>
+          MIDI Test (dev)
+        </button>
+      </div>
+
+      {screen === 'songs' && (
+        <MainSongs
+          songs={PLACEHOLDER_SONGS}
+          onAddSong={() => setScreen('midi-test')}
+          onOpenSong={(song) => console.log('open song', song)}
+        />
+      )}
+      {screen === 'midi-test' && <MidiTest />}
+    </div>
   );
 }

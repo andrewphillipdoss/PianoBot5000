@@ -13,7 +13,7 @@ import pytest
 
 music21 = pytest.importorskip("music21")
 
-from pianobot.charts.musicxml_format import chart_from_score
+from pianobot.charts.musicxml_format import chart_from_score, load_chart
 
 
 def _score_with_part(part) -> "music21.stream.Score":
@@ -145,6 +145,22 @@ def test_no_rehearsal_marks_gives_one_whole_section():
     assert chart.sections[0].label == "A"
     assert chart.sections[0].start == 0.0
     assert chart.sections[0].end == 4.0
+
+
+def test_load_chart_accepts_a_plain_string_path(tmp_path):
+    # load_chart's file-reading wrapper must coerce its argument to a
+    # Path itself (like simple_format.load_chart already does), since a
+    # caller passing a plain string (common when a path comes from,
+    # say, a database row rather than pathlib) shouldn't crash on
+    # `path.stem`.
+    part = music21.stream.Part()
+    part.append(music21.note.Note("C4", quarterLength=1.0))
+    score = _score_with_part(part)
+    out = tmp_path / "tiny.musicxml"
+    score.write("musicxml", fp=str(out))
+
+    chart = load_chart(str(out))  # a plain str, not a Path
+    assert len(chart.melody) == 1
 
 
 def test_rehearsal_marks_become_labeled_sections():

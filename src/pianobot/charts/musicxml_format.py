@@ -64,6 +64,7 @@ def load_chart(path: Path, melody_part: int = 0, chord_part: int = 0) -> Chart:
             "music21 is not installed. Run: pip install 'pianobot5000[charts-musicxml]'"
         ) from exc
 
+    path = Path(path)
     score = music21.converter.parse(str(path))
     return chart_from_score(music21, score, title=path.stem, melody_part=melody_part, chord_part=chord_part)
 

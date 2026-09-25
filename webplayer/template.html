@@ -1,0 +1,478 @@
+<title>Falling Notes</title>
+<style>
+  :root {
+    --bg: #0c0b10;
+    --panel: #16141c;
+    --line: #29262f;
+    --ink: #f2ede4;
+    --ink-dim: #8f8998;
+    --rh: #e0a058;
+    --rh-glow: rgba(224, 160, 88, 0.55);
+    --lh: #7b8fd4;
+    --lh-glow: rgba(123, 143, 212, 0.55);
+    --white-key: #f2ede4;
+    --white-key-edge: #c9c2b4;
+    --black-key: #17151b;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    overflow: hidden;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    padding-inline: 16px;
+    padding-block: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-bottom, 0px));
+    gap: 10px;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  h1 {
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 0;
+    white-space: nowrap;
+    letter-spacing: -0.01em;
+  }
+  .subtitle {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    color: var(--ink-dim);
+    white-space: nowrap;
+  }
+
+  button.play {
+    appearance: none;
+    border: 1px solid var(--rh);
+    background: transparent;
+    color: var(--rh);
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex: none;
+    transition: background 0.15s ease;
+  }
+  button.play:hover { background: rgba(224, 160, 88, 0.12); }
+  button.play svg { width: 15px; height: 15px; fill: var(--rh); }
+
+  .timeline {
+    flex: 1;
+    min-width: 120px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .time {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.78rem;
+    color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  input[type="range"] {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line);
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--rh);
+    cursor: pointer;
+    box-shadow: 0 0 0 4px var(--rh-glow);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    border: none;
+    border-radius: 50%;
+    background: var(--rh);
+    cursor: pointer;
+  }
+
+  .legend {
+    display: flex;
+    gap: 12px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    color: var(--ink-dim);
+    white-space: nowrap;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+  .swatch.rh { background: var(--rh); }
+  .swatch.lh { background: var(--lh); }
+
+  main {
+    flex: 1;
+    min-height: 0;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    background: #08070b;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 1rem; }
+    .subtitle { display: none; }
+    .legend span:nth-child(1) { display: none; }
+  }
+</style>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<header>
+  <button class="play" id="playBtn" aria-label="Play">
+    <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    <svg id="pauseIcon" viewBox="0 0 24 24" hidden><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+  </button>
+  <div>
+    <h1 id="title">Falling Notes</h1>
+    <div class="subtitle" id="subtitle">a small Neothesia-style visualizer for pianobot5000 charts</div>
+  </div>
+  <div class="timeline">
+    <span class="time" id="timeNow">0:00</span>
+    <input type="range" id="scrubber" min="0" max="1000" value="0">
+    <span class="time" id="timeTotal">0:00</span>
+  </div>
+  <div class="legend">
+    <span><span class="swatch rh"></span>right hand</span>
+    <span><span class="swatch lh"></span>left hand</span>
+  </div>
+</header>
+
+<main>
+  <canvas id="canvas"></canvas>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- Song data -----------------------------------------------------
+  // Embedded directly (produced by `pianobot chart ... -o song.mid`,
+  // then extracted note-by-note with pretty_midi). Swap this object out
+  // to visualize a different chart's output.
+  const SONG = __SONG_DATA__;
+
+  if (SONG.title) {
+    document.getElementById("title").textContent = SONG.title;
+    document.getElementById("subtitle").textContent = "playing through pianobot5000";
+    document.title = SONG.title + " — Falling Notes";
+  }
+
+  const notes = SONG.notes.slice().sort((a, b) => a.start - b.start);
+  const duration = SONG.duration;
+
+  // ---- Keyboard range --------------------------------------------------
+  const WHITE_PC = new Set([0, 2, 4, 5, 7, 9, 11]);
+  function isWhite(pitch) { return WHITE_PC.has(pitch % 12); }
+
+  let minPitch = Infinity, maxPitch = -Infinity;
+  for (const n of notes) { minPitch = Math.min(minPitch, n.pitch); maxPitch = Math.max(maxPitch, n.pitch); }
+  // Pad out to full octave boundaries (round down to C, up to B) so the
+  // keyboard doesn't start/end mid-octave.
+  minPitch = Math.max(0, Math.floor((minPitch - 2) / 12) * 12);
+  maxPitch = Math.min(127, Math.ceil((maxPitch + 3) / 12) * 12 + 11);
+
+  const whiteKeys = [];
+  for (let p = minPitch; p <= maxPitch; p++) if (isWhite(p)) whiteKeys.push(p);
+  const whiteIndexOf = new Map(whiteKeys.map((p, i) => [p, i]));
+
+  const BLACK_OFFSET_FRACTION = { 1: 0.62, 3: 0.72, 6: 0.58, 8: 0.66, 10: 0.74 };
+
+  // ---- Canvas + layout ---------------------------------------------------
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  let W = 0, H = 0, DPR = 1;
+  let whiteKeyW = 0, keyboardH = 0, keyboardY = 0;
+
+  function layout() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    DPR = window.devicePixelRatio || 1;
+    W = Math.max(1, Math.floor(rect.width));
+    H = Math.max(1, Math.floor(rect.height));
+    canvas.width = W * DPR;
+    canvas.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    whiteKeyW = W / whiteKeys.length;
+    keyboardH = Math.max(64, Math.min(120, H * 0.22));
+    keyboardY = H - keyboardH;
+  }
+
+  function whiteKeyX(pitch) { return whiteIndexOf.get(pitch) * whiteKeyW; }
+
+  function blackKeyX(pitch) {
+    // Position relative to the white key just below it in pitch.
+    const prevWhite = pitch - 1;
+    const idx = whiteIndexOf.get(prevWhite);
+    if (idx === undefined) return null;
+    const frac = BLACK_OFFSET_FRACTION[pitch % 12];
+    return idx * whiteKeyW + frac * whiteKeyW - whiteKeyW * 0.32 / 2;
+  }
+
+  // ---- Playback state -----------------------------------------------------
+  let songTime = 0;         // seconds into the song
+  let playing = false;
+  let rafId = null;
+  let lastFrameWall = 0;
+
+  const LOOKAHEAD = 3.6; // seconds of highway visible above the keys
+
+  // ---- Audio ------------------------------------------------------------
+  let audioCtx = null;
+  let scheduledUntil = -1; // song-time horizon already scheduled
+  const activeVoices = new Map(); // note index -> {osc, gain}
+
+  function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  }
+
+  function playNote(note, atCtxTime) {
+    const freq = 440 * Math.pow(2, (note.pitch - 69) / 12);
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = freq;
+    const dur = Math.max(0.05, note.end - note.start);
+    const peak = note.hand === "RH" ? 0.16 : 0.11;
+    gain.gain.setValueAtTime(0, atCtxTime);
+    gain.gain.linearRampToValueAtTime(peak, atCtxTime + 0.012);
+    gain.gain.setTargetAtTime(peak * 0.55, atCtxTime + 0.012, 0.15);
+    const releaseStart = atCtxTime + dur;
+    gain.gain.setTargetAtTime(0, releaseStart, 0.09);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(atCtxTime);
+    osc.stop(releaseStart + 0.6);
+    return { osc, gain };
+  }
+
+  function stopAllVoices() {
+    for (const { osc, gain } of activeVoices.values()) {
+      try {
+        gain.gain.cancelScheduledValues(audioCtx.currentTime);
+        gain.gain.setValueAtTime(gain.gain.value, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.03);
+        osc.stop(audioCtx.currentTime + 0.04);
+      } catch (e) { /* already stopped */ }
+    }
+    activeVoices.clear();
+  }
+
+  function scheduleUpTo(targetSongTime) {
+    const horizon = Math.max(targetSongTime, scheduledUntil);
+    for (let i = 0; i < notes.length; i++) {
+      const n = notes[i];
+      if (n.start < scheduledUntil || n.start >= horizon) continue;
+      const ctxTime = audioCtx.currentTime + (n.start - songTime);
+      if (ctxTime < audioCtx.currentTime - 0.02) continue; // already passed
+      const voice = playNote(n, Math.max(ctxTime, audioCtx.currentTime));
+      activeVoices.set(i, voice);
+    }
+    scheduledUntil = horizon;
+  }
+
+  // ---- Drawing -----------------------------------------------------------
+  function activeNotesAt(t) {
+    // Small linear scan is plenty for a piece this size; called once per frame.
+    const active = new Map(); // pitch -> hand
+    for (const n of notes) {
+      if (n.start <= t && t < n.end) active.set(n.pitch, n.hand);
+    }
+    return active;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // lane grid (very faint, one line per white key)
+    ctx.strokeStyle = "rgba(255,255,255,0.03)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= whiteKeys.length; i++) {
+      const x = Math.round(i * whiteKeyW) + 0.5;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, keyboardY); ctx.stroke();
+    }
+
+    const pxPerSec = (keyboardY - 8) / LOOKAHEAD;
+    const active = activeNotesAt(songTime);
+
+    // falling note bars
+    for (const n of notes) {
+      if (n.end < songTime - 0.05) continue;
+      if (n.start > songTime + LOOKAHEAD) continue;
+      const white = isWhite(n.pitch);
+      const x = white ? whiteKeyX(n.pitch) : blackKeyX(n.pitch);
+      if (x === null) continue;
+      const w = white ? whiteKeyW * 0.86 : whiteKeyW * 0.58;
+
+      const rawBottom = keyboardY - (n.start - songTime) * pxPerSec;
+      const rawTop = keyboardY - (n.end - songTime) * pxPerSec;
+      const bottomY = Math.min(rawBottom, keyboardY);
+      const topY = Math.min(rawTop, keyboardY - 2);
+      if (bottomY <= topY) continue;
+
+      const fill = n.hand === "RH" ? "#e0a058" : "#7b8fd4";
+      const glow = n.hand === "RH" ? "rgba(224,160,88,0.5)" : "rgba(123,143,212,0.5)";
+      const r = Math.min(6, w / 3);
+
+      ctx.save();
+      ctx.shadowColor = glow;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = fill;
+      roundRect(ctx, x + (white ? whiteKeyW * 0.07 : whiteKeyW * 0.21), topY, w, bottomY - topY, r);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    drawKeyboard(active);
+  }
+
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
+  function drawKeyboard(active) {
+    // white keys
+    for (const p of whiteKeys) {
+      const x = whiteKeyX(p);
+      const isActive = active.has(p);
+      ctx.fillStyle = isActive
+        ? (active.get(p) === "RH" ? "#f3d9b3" : "#c7d0ef")
+        : "#f2ede4";
+      ctx.fillRect(x + 0.5, keyboardY, whiteKeyW - 1, keyboardH);
+      ctx.strokeStyle = "#c9c2b4";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x + 0.5, keyboardY, whiteKeyW - 1, keyboardH);
+      if (isActive) {
+        ctx.fillStyle = active.get(p) === "RH" ? "#e0a058" : "#7b8fd4";
+        ctx.fillRect(x + 0.5, keyboardY, whiteKeyW - 1, 4);
+      }
+    }
+    // black keys on top
+    const blackH = keyboardH * 0.62;
+    for (let p = minPitch; p <= maxPitch; p++) {
+      if (isWhite(p)) continue;
+      const x = blackKeyX(p);
+      if (x === null) continue;
+      const w = whiteKeyW * 0.58 * 0.62;
+      const isActive = active.has(p);
+      ctx.fillStyle = isActive
+        ? (active.get(p) === "RH" ? "#8a5a22" : "#39437a")
+        : "#17151b";
+      ctx.fillRect(x + whiteKeyW * 0.58 * 0.19, keyboardY, w, blackH);
+    }
+  }
+
+  // ---- Time formatting ----------------------------------------------------
+  function fmtTime(s) {
+    s = Math.max(0, s);
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return m + ":" + String(sec).padStart(2, "0");
+  }
+
+  const timeNow = document.getElementById("timeNow");
+  const timeTotal = document.getElementById("timeTotal");
+  const scrubber = document.getElementById("scrubber");
+  timeTotal.textContent = fmtTime(duration);
+  scrubber.max = String(Math.round(duration * 10));
+
+  function updateUI() {
+    timeNow.textContent = fmtTime(songTime);
+    if (!scrubbing) scrubber.value = String(Math.round(songTime * 10));
+  }
+
+  // ---- Animation loop -----------------------------------------------------
+  function tick(wallNow) {
+    if (playing) {
+      const dt = (wallNow - lastFrameWall) / 1000;
+      lastFrameWall = wallNow;
+      songTime += dt;
+      if (songTime >= duration) {
+        songTime = duration;
+        pause();
+      } else {
+        scheduleUpTo(songTime + 0.2);
+      }
+    }
+    draw();
+    updateUI();
+    rafId = requestAnimationFrame(tick);
+  }
+
+  const playBtn = document.getElementById("playBtn");
+  const playIcon = document.getElementById("playIcon");
+  const pauseIcon = document.getElementById("pauseIcon");
+
+  function play() {
+    ensureAudio();
+    if (songTime >= duration) songTime = 0;
+    scheduledUntil = songTime; // reschedule forward from here
+    playing = true;
+    lastFrameWall = performance.now();
+    playIcon.hidden = true;
+    pauseIcon.hidden = false;
+  }
+
+  function pause() {
+    playing = false;
+    if (audioCtx) stopAllVoices();
+    playIcon.hidden = false;
+    pauseIcon.hidden = true;
+  }
+
+  playBtn.addEventListener("click", () => { playing ? pause() : play(); });
+
+  let scrubbing = false;
+  scrubber.addEventListener("pointerdown", () => { scrubbing = true; });
+  scrubber.addEventListener("input", () => {
+    songTime = Number(scrubber.value) / 10;
+    if (audioCtx) stopAllVoices();
+    scheduledUntil = songTime;
+    draw(); updateUI();
+  });
+  scrubber.addEventListener("pointerup", () => { scrubbing = false; });
+
+  window.addEventListener("resize", () => { layout(); draw(); });
+  layout();
+  draw();
+  rafId = requestAnimationFrame(tick);
+})();
+</script>

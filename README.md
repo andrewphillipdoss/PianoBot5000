@@ -182,6 +182,14 @@ generated geometry (not a downloaded 3D model), hinged so a rotation
 presses it down convincingly. See `visualizer/README.md` for setup and
 usage; verified on Linux, not yet tried on macOS/Windows.
 
+## Falling-notes web player
+
+`webplayer/` turns any MIDI file this project produces into a single
+self-contained `.html` "falling notes" player (Neothesia/Synthesia-style)
+-- open it in a browser, no server or build step. Audio is synthesized
+live via the Web Audio API, kept in sync with the falling-notes animation.
+See `webplayer/README.md` for usage.
+
 ---
 
 ## Transcribe mode (optional, legacy)

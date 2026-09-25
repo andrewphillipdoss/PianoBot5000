@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMidiInput } from '../hooks/useMidiInput.js';
+import { useMidi } from '../hooks/MidiProvider.jsx';
 import { enableAudio, playNote, stopAllNotes, stopNote } from '../pianoSynth.js';
 import { detectChordQuality, formatChordSymbol, midiNoteName } from '../theory.js';
 import './MidiTest.css';
@@ -11,13 +11,13 @@ import './MidiTest.css';
  * before any real recording UI gets built on top of Web MIDI.
  */
 export default function MidiTest() {
-  const { supported, status, error, inputs, selectedInputId, setSelectedInputId, events, heldNotes } = useMidiInput();
+  const { supported, status, error, inputs, selectedInputId, setSelectedInputId, events, heldNotes } = useMidi();
   const [soundOn, setSoundOn] = useState(false);
   const lastPlayedEventId = useRef(0);
 
   // Reacts to the live event stream to trigger sound -- deliberately
-  // separate from useMidiInput itself, which stays a generic
-  // MIDI-in-to-events hook with no audio-playback opinion baked in.
+  // separate from MidiProvider itself, which stays a generic
+  // MIDI-in-to-events context with no audio-playback opinion baked in.
   useEffect(() => {
     if (!soundOn || events.length === 0) return;
     const newest = events[0];

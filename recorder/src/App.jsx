@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { MidiProvider } from './hooks/MidiProvider.jsx';
 import { useSongLibrary } from './hooks/useSongLibrary.js';
 import MainSongs from './screens/MainSongs.jsx';
 import MidiTest from './screens/MidiTest.jsx';
@@ -44,33 +45,35 @@ export default function App() {
   const library = useSongLibrary();
 
   return (
-    <div>
-      <div style={NAV_STYLE}>
-        <button onClick={() => setScreen('songs')} style={navLinkStyle(screen === 'songs')}>My Songs</button>
-        <button onClick={() => setScreen('midi-test')} style={navLinkStyle(screen === 'midi-test')}>MIDI Test (dev)</button>
+    <MidiProvider>
+      <div>
+        <div style={NAV_STYLE}>
+          <button onClick={() => setScreen('songs')} style={navLinkStyle(screen === 'songs')}>My Songs</button>
+          <button onClick={() => setScreen('midi-test')} style={navLinkStyle(screen === 'midi-test')}>MIDI Test (dev)</button>
+        </div>
+
+        {screen === 'songs' && library.status !== 'ready' && (
+          <LibraryOnboarding status={library.status} onChooseFolder={library.chooseFolder} onReconnect={library.reconnectFolder} />
+        )}
+
+        {screen === 'songs' && library.status === 'ready' && (
+          <MainSongs
+            songs={library.songs}
+            onAddSong={() => setScreen('addSong')}
+            onOpenSong={(song) => console.log('open song (viewing an existing song is not built yet)', song)}
+          />
+        )}
+
+        {screen === 'addSong' && (
+          <RecordSongFlow
+            onCancel={() => setScreen('songs')}
+            saveSong={library.saveSong}
+            onSaved={() => setScreen('songs')}
+          />
+        )}
+
+        {screen === 'midi-test' && <MidiTest />}
       </div>
-
-      {screen === 'songs' && library.status !== 'ready' && (
-        <LibraryOnboarding status={library.status} onChooseFolder={library.chooseFolder} onReconnect={library.reconnectFolder} />
-      )}
-
-      {screen === 'songs' && library.status === 'ready' && (
-        <MainSongs
-          songs={library.songs}
-          onAddSong={() => setScreen('addSong')}
-          onOpenSong={(song) => console.log('open song (viewing an existing song is not built yet)', song)}
-        />
-      )}
-
-      {screen === 'addSong' && (
-        <RecordSongFlow
-          onCancel={() => setScreen('songs')}
-          saveSong={library.saveSong}
-          onSaved={() => setScreen('songs')}
-        />
-      )}
-
-      {screen === 'midi-test' && <MidiTest />}
-    </div>
+    </MidiProvider>
   );
 }

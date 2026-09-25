@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { useMidiInput } from '../hooks/useMidiInput.js';
+import { useMidi } from '../hooks/MidiProvider.jsx';
 import { useRecordingSession } from '../hooks/useRecordingSession.js';
 import { detectChordQuality, formatChordSymbol, midiNoteName } from '../theory.js';
 import './shared.css';
@@ -15,7 +15,12 @@ import './shared.css';
  */
 export default function RecordChords({ title, sectionLabel, tempo, onBack, onDone }) {
   const { phase, result, start, stop, handleMidiMessage } = useRecordingSession({ tempo, mode: 'chords' });
-  const midi = useMidiInput({ onMessage: handleMidiMessage });
+  const midi = useMidi();
+
+  // Feed the shared MIDI stream into this screen's recording session
+  // only while it's actually mounted -- unsubscribes automatically on
+  // navigating away, so nothing gets buffered when you're not here.
+  useEffect(() => midi.subscribe(handleMidiMessage), [midi, handleMidiMessage]);
 
   useEffect(() => {
     if (phase === 'done' && result) onDone(result);
@@ -54,6 +59,22 @@ export default function RecordChords({ title, sectionLabel, tempo, onBack, onDon
       )}
       {midi.status === 'granted' && midi.inputs.length === 0 && (
         <div className="panel">No MIDI input found -- check your keyboard/interface is plugged in.</div>
+      )}
+
+      {midi.inputs.length === 1 && (
+        <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Connected: {midi.inputs[0].name}</span>
+      )}
+      {midi.inputs.length > 1 && (
+        <label className="field">
+          Input device
+          <select value={midi.selectedInputId ?? ''} onChange={(e) => midi.setSelectedInputId(e.target.value)}>
+            {midi.inputs.map((input) => (
+              <option key={input.id} value={input.id}>
+                {input.name} {input.manufacturer ? `(${input.manufacturer})` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
 
       <div className="record-console">

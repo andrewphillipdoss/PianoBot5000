@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useMidiInput } from '../hooks/useMidiInput.js';
+import { useMidi } from '../hooks/MidiProvider.jsx';
 import { useRecordingSession } from '../hooks/useRecordingSession.js';
 import { formatChordSymbol } from '../theory.js';
 import './shared.css';
@@ -14,7 +14,9 @@ import './shared.css';
  */
 export default function RecordMelody({ title, sectionLabel, tempo, chordsResult, onBack, onDone }) {
   const { phase, result, start, restart, handleMidiMessage } = useRecordingSession({ tempo, mode: 'melody' });
-  useMidiInput({ onMessage: handleMidiMessage });
+  const midi = useMidi();
+
+  useEffect(() => midi.subscribe(handleMidiMessage), [midi, handleMidiMessage]);
 
   useEffect(() => {
     if (phase === 'done' && result) onDone(result);
@@ -38,6 +40,22 @@ export default function RecordMelody({ title, sectionLabel, tempo, chordsResult,
         <a href="#" className="screen__back" onClick={(e) => { e.preventDefault(); onBack(); }}>&larr; Chords</a>
         <h1 style={{ fontSize: 26, marginTop: 6 }}>{title} &mdash; Section {sectionLabel} &mdash; Melody</h1>
       </div>
+
+      {midi.inputs.length === 1 && (
+        <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Connected: {midi.inputs[0].name}</span>
+      )}
+      {midi.inputs.length > 1 && (
+        <label className="field">
+          Input device
+          <select value={midi.selectedInputId ?? ''} onChange={(e) => midi.setSelectedInputId(e.target.value)}>
+            {midi.inputs.map((input) => (
+              <option key={input.id} value={input.id}>
+                {input.name} {input.manufacturer ? `(${input.manufacturer})` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <div className="panel">
         <span className="panel-label">Chords (playing back)</span>

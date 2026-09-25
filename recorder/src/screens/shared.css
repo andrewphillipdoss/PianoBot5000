@@ -122,9 +122,20 @@
   color: var(--ink);
 }
 
-.field input:focus {
+.field input:focus,
+.field select:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.field select {
+  font-family: inherit;
+  font-size: 15px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
 }
 
 .actions-row {

@@ -5,8 +5,9 @@ import { RecordingSession } from '../recordingSession.js';
 /**
  * React wrapper around RecordingSession (see that file for why the
  * state machine itself is a plain class, not a hook). Wire the
- * returned `handleMidiMessage` to useMidiInput's `onMessage` so
- * captured notes reach it, and call `start`/`stop`/`restart` from UI.
+ * returned `handleMidiMessage` to the shared MidiProvider's
+ * `subscribe()` so captured notes reach it, and call
+ * `start`/`stop`/`restart` from UI.
  *
  * `tempo`/`mode` are only read once, at construction -- this hook
  * doesn't react to them changing later. If a screen ever needs a

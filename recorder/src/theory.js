@@ -20,6 +20,20 @@ export const TRIAD_INTERVALS = {
   aug: [0, 4, 8],
 };
 
+// Seventh-chord intervals -- same idea, one more note. Covers the
+// vocabulary that actually shows up in hymns/standards (dominant,
+// major, and minor 7ths, half-diminished, diminished); genuinely
+// exotic shapes (9ths, sus chords, true slash chords) are left out on
+// purpose -- see the recorder's design discussion for why.
+export const SEVENTH_INTERVALS = {
+  dom7: [0, 4, 7, 10],
+  maj7: [0, 4, 7, 11],
+  min7: [0, 3, 7, 10],
+  m7b5: [0, 3, 6, 10], // half-diminished
+  dim7: [0, 3, 6, 9],
+  minMaj7: [0, 3, 7, 11],
+};
+
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 /** MIDI pitch number -> note name, e.g. 60 -> "C4" (MIDI's own convention: middle C = C4). */
@@ -28,42 +42,53 @@ export function midiNoteName(pitch) {
   return `${NOTE_NAMES[pitch % 12]}${octave}`;
 }
 
-const QUALITY_SUFFIX = { maj: '', min: 'm', dim: 'dim', aug: 'aug' };
+const QUALITY_SUFFIX = {
+  maj: '', min: 'm', dim: 'dim', aug: 'aug',
+  dom7: '7', maj7: 'maj7', min7: 'm7', m7b5: 'm7b5', dim7: 'dim7', minMaj7: 'm(maj7)',
+};
 
 /** (root pitch class, quality) -> a plain lead-sheet chord symbol, e.g. (0, "min") -> "Cm". */
 export function formatChordSymbol(rootPitchClass, quality) {
   return `${NOTE_NAMES[rootPitchClass]}${QUALITY_SUFFIX[quality] ?? quality}`;
 }
 
-/**
- * The reverse of chord voicing: given the pitch classes actually
- * played (0-11, octave-independent) plus optionally which one was the
- * physical bass note, figure out which root + triad quality they
- * spell. Returns null if the set isn't a recognizable triad (wrong
- * number of distinct pitch classes, or an interval pattern that
- * doesn't match maj/min/dim/aug).
- *
- * `bassPitchClass` breaks the one real ambiguity here: an augmented
- * triad is symmetric (every one of its 3 notes is a valid "root" by
- * pure interval pattern alone), so {C, E, G#} played as root position
- * vs. its own inversions is otherwise indistinguishable -- preferring
- * whichever candidate's root is the actual lowest note played
- * resolves it the way a real musician would read it.
- */
-export function detectChordQuality(pitchClasses, bassPitchClass = null) {
-  const pcSet = new Set(pitchClasses);
-  if (pcSet.size !== 3) return null;
-
+function matchesAgainst(pcSet, intervalTable) {
   const matches = [];
   for (const root of [...pcSet].sort((a, b) => a - b)) {
-    for (const quality of Object.keys(TRIAD_INTERVALS)) {
-      const [, third, fifth] = TRIAD_INTERVALS[quality];
-      const candidate = new Set([root, (root + third) % 12, (root + fifth) % 12]);
+    for (const quality of Object.keys(intervalTable)) {
+      const candidate = new Set(intervalTable[quality].map((interval) => (root + interval) % 12));
       if (candidate.size === pcSet.size && [...candidate].every((pc) => pcSet.has(pc))) {
         matches.push({ rootPitchClass: root, quality });
       }
     }
   }
+  return matches;
+}
+
+/**
+ * The reverse of chord voicing: given the pitch classes actually
+ * played (0-11, octave-independent) plus optionally which one was the
+ * physical bass note, figure out which root + quality they spell --
+ * a triad (3 distinct pitch classes, against TRIAD_INTERVALS) or a
+ * seventh chord (4, against SEVENTH_INTERVALS). Returns null for
+ * anything else (wrong note count, or an interval pattern that
+ * doesn't match a known shape) -- there's a real, finite vocabulary
+ * of recognized chords, not "any combination of notes."
+ *
+ * `bassPitchClass` breaks the real ambiguities in that vocabulary:
+ * an augmented triad and a diminished 7th are both *symmetric*
+ * (every one of their notes is an equally valid "root" by pure
+ * interval pattern alone -- e.g. {C, E, G#} is C augmented, E
+ * augmented, and G# augmented all at once), so preferring whichever
+ * candidate's root is the actual lowest note played resolves it the
+ * way a real musician would read it off the keys.
+ */
+export function detectChordQuality(pitchClasses, bassPitchClass = null) {
+  const pcSet = new Set(pitchClasses);
+  const intervalTable = pcSet.size === 3 ? TRIAD_INTERVALS : pcSet.size === 4 ? SEVENTH_INTERVALS : null;
+  if (!intervalTable) return null;
+
+  const matches = matchesAgainst(pcSet, intervalTable);
   if (matches.length === 0) return null;
   if (bassPitchClass !== null) {
     const bassMatch = matches.find((m) => m.rootPitchClass === bassPitchClass);
@@ -114,11 +139,11 @@ export function clusterOnsets(notes, thresholdBeats = 0.15) {
 
 /**
  * Turn a captured left-hand (chords) take into ChordEvents. Each
- * cluster's pitch classes must form a recognizable triad (see
- * `detectChordQuality`) -- a cluster that doesn't is a real problem
- * with the take (an extra/missing note), so this throws with the beat
- * position and pitches involved rather than silently guessing, so the
- * UI can point at exactly what to re-record.
+ * cluster's pitch classes must form a recognizable triad or seventh
+ * chord (see `detectChordQuality`) -- a cluster that doesn't is a
+ * real problem with the take (an extra/missing note), so this throws
+ * with the beat position and pitches involved rather than silently
+ * guessing, so the UI can point at exactly what to re-record.
  */
 export function detectChords(notes, thresholdBeats = 0.15) {
   return clusterOnsets(notes, thresholdBeats).map((cluster) => {
@@ -128,9 +153,9 @@ export function detectChords(notes, thresholdBeats = 0.15) {
     if (!detected) {
       const pitches = [...cluster].sort((a, b) => a.pitch - b.pitch).map((n) => n.pitch);
       throw new Error(
-        `couldn't recognize a triad at beat ${cluster[0].start.toFixed(2)}: pitches ` +
+        `couldn't recognize a chord at beat ${cluster[0].start.toFixed(2)}: pitches ` +
           `[${pitches.join(', ')}] (pitch classes [${[...new Set(pitchClasses)].sort((a, b) => a - b).join(', ')}]) -- ` +
-          'expected exactly 3 distinct pitch classes forming a maj/min/dim/aug triad'
+          'expected 3 distinct pitch classes forming a maj/min/dim/aug triad, or 4 forming a recognized 7th chord'
       );
     }
     return {

@@ -22,6 +22,15 @@ describe('formatChordSymbol', () => {
     expect(formatChordSymbol(6, 'dim')).toBe('F#dim');
     expect(formatChordSymbol(4, 'aug')).toBe('Eaug');
   });
+
+  it('writes 7th chords with their usual suffixes', () => {
+    expect(formatChordSymbol(7, 'dom7')).toBe('G7');
+    expect(formatChordSymbol(0, 'maj7')).toBe('Cmaj7');
+    expect(formatChordSymbol(0, 'min7')).toBe('Cm7');
+    expect(formatChordSymbol(11, 'm7b5')).toBe('Bm7b5');
+    expect(formatChordSymbol(0, 'dim7')).toBe('Cdim7');
+    expect(formatChordSymbol(0, 'minMaj7')).toBe('Cm(maj7)');
+  });
 });
 
 describe('midiNoteName', () => {
@@ -56,7 +65,6 @@ describe('detectChordQuality', () => {
   it('returns null for a set that is not a recognizable triad', () => {
     expect(detectChordQuality([0, 1, 2])).toBeNull(); // not a triad shape at all
     expect(detectChordQuality([0, 4])).toBeNull(); // only 2 distinct pitch classes
-    expect(detectChordQuality([0, 4, 7, 10])).toBeNull(); // 4 distinct pitch classes (a 7th, not a triad)
   });
 
   it('uses the bass note to resolve an augmented triad\'s inherent symmetry', () => {
@@ -66,6 +74,34 @@ describe('detectChordQuality', () => {
     const bassE = detectChordQuality([0, 4, 8], 4);
     expect(bassC.rootPitchClass).toBe(0);
     expect(bassE.rootPitchClass).toBe(4);
+  });
+
+  it('recognizes dominant, major, and minor 7th chords (4 distinct pitch classes)', () => {
+    expect(detectChordQuality([0, 4, 7, 10])).toEqual({ rootPitchClass: 0, quality: 'dom7' }); // C7
+    expect(detectChordQuality([0, 4, 7, 11])).toEqual({ rootPitchClass: 0, quality: 'maj7' }); // Cmaj7
+    expect(detectChordQuality([0, 3, 7, 10])).toEqual({ rootPitchClass: 0, quality: 'min7' }); // Cm7
+  });
+
+  it('recognizes half-diminished and diminished 7th chords', () => {
+    expect(detectChordQuality([11, 2, 5, 9])).toEqual({ rootPitchClass: 11, quality: 'm7b5' }); // Bm7b5
+    expect(detectChordQuality([0, 3, 6, 9])).toEqual({ rootPitchClass: 0, quality: 'dim7' });
+  });
+
+  it("uses the bass note to resolve a diminished 7th's inherent (4-way) symmetry", () => {
+    // {0, 3, 6, 9} is fully symmetric -- every one of its 4 notes is an
+    // equally valid root by pure interval pattern alone.
+    expect(detectChordQuality([0, 3, 6, 9], 0).rootPitchClass).toBe(0);
+    expect(detectChordQuality([0, 3, 6, 9], 3).rootPitchClass).toBe(3);
+    expect(detectChordQuality([0, 3, 6, 9], 6).rootPitchClass).toBe(6);
+    expect(detectChordQuality([0, 3, 6, 9], 9).rootPitchClass).toBe(9);
+  });
+
+  it('returns null for 4 distinct pitch classes that are not a recognized 7th chord', () => {
+    expect(detectChordQuality([0, 1, 2, 3])).toBeNull();
+  });
+
+  it('returns null for 5 or more distinct pitch classes (outside this app\'s recognized vocabulary)', () => {
+    expect(detectChordQuality([0, 2, 4, 7, 10])).toBeNull();
   });
 });
 
@@ -122,6 +158,17 @@ describe('detectChords', () => {
     ];
     const [chord] = detectChords(notes, 0.05);
     expect(chord).toEqual({ rootPitchClass: 0, quality: 'maj', start: 0.0, end: 4.0 });
+  });
+
+  it('turns a clean 7th-chord cluster (4 notes) into one ChordEvent', () => {
+    const notes = [
+      { pitch: 43, start: 4.0, end: 8.0 }, // G2
+      { pitch: 47, start: 4.0, end: 8.0 }, // B2
+      { pitch: 50, start: 4.0, end: 8.0 }, // D3
+      { pitch: 53, start: 4.0, end: 7.9 }, // F3
+    ];
+    const [chord] = detectChords(notes, 0.05);
+    expect(chord).toEqual({ rootPitchClass: 7, quality: 'dom7', start: 4.0, end: 8.0 }); // G7
   });
 
   it('throws with the beat position and pitches for an unrecognizable cluster', () => {

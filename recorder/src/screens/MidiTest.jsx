@@ -27,15 +27,16 @@ export default function MidiTest() {
     else stopNote(newest.note);
   }, [events, soundOn]);
 
-  // Only recognizes plain triads (this app's current voicing scope --
+  // Recognizes triads and 7th chords (this app's current vocabulary --
   // see theory.js) from whichever pitch classes are currently held,
   // octave doublings collapsed and ignored, lowest held note as the
-  // tiebreaking bass for the one real ambiguity (an augmented triad).
+  // tiebreaking bass for the real ambiguities (augmented triads and
+  // diminished 7ths are both symmetric shapes).
   const heldChord = useMemo(() => {
     const held = [...heldNotes];
     const pitchClasses = held.map((p) => p % 12);
     const distinctCount = new Set(pitchClasses).size;
-    if (distinctCount !== 3) return { chord: null, distinctCount };
+    if (distinctCount !== 3 && distinctCount !== 4) return { chord: null, distinctCount };
     const bassPitchClass = held.reduce((min, p) => Math.min(min, p), Infinity) % 12;
     return { chord: detectChordQuality(pitchClasses, bassPitchClass), distinctCount };
   }, [heldNotes]);
@@ -123,10 +124,10 @@ export default function MidiTest() {
           <span className="midi-test__chord-symbol">{formatChordSymbol(heldChord.chord.rootPitchClass, heldChord.chord.quality)}</span>
         ) : (
           <span className="midi-test__chord-hint">
-            {heldChord.distinctCount === 0 && 'Hold a triad (3 notes)...'}
+            {heldChord.distinctCount === 0 && 'Hold a chord (3-4 notes)...'}
             {heldChord.distinctCount > 0 && heldChord.distinctCount < 3 && `${heldChord.distinctCount} of 3 notes held`}
-            {heldChord.distinctCount === 3 && "Not a recognizable triad -- check for a wrong/extra note"}
-            {heldChord.distinctCount > 3 && `${heldChord.distinctCount} distinct notes held -- only plain triads are recognized`}
+            {(heldChord.distinctCount === 3 || heldChord.distinctCount === 4) && 'Not a recognizable chord -- check for a wrong/extra note'}
+            {heldChord.distinctCount > 4 && `${heldChord.distinctCount} distinct notes held -- only triads/7th chords are recognized`}
           </span>
         )}
       </div>

@@ -13,7 +13,7 @@ import './shared.css';
  * a simple melody piano-roll -- real lead-sheet notation rendering is
  * a deliberately separate, later piece; see the README.
  */
-export default function SongView({ song, onBack }) {
+export default function SongView({ song, onBack, onAddSection, onReRecordChords, onReRecordMelody }) {
   const [chartData, setChartData] = useState(null);
   const [error, setError] = useState(null);
   const { isPlaying, play, stop } = useSongPlayback();
@@ -73,7 +73,8 @@ export default function SongView({ song, onBack }) {
             </div>
           </div>
 
-          {chartData.sections.map((section) => {
+          {chartData.sections.map((section, index) => {
+            const isLastSection = index === chartData.sections.length - 1;
             const sectionChords = mergeConsecutiveChordEntries(
               chartData.chords.filter((c) => c.beat >= section.start_beat && c.beat < section.end_beat)
             );
@@ -107,9 +108,24 @@ export default function SongView({ song, onBack }) {
                   </span>
                   <MelodyRoll notes={sectionMelody} sectionLengthBeats={section.end_beat - section.start_beat} />
                 </div>
+
+                {isLastSection ? (
+                  <div className="actions-row" style={{ justifyContent: 'flex-start', gap: 10 }}>
+                    <button className="btn-ghost" onClick={() => onReRecordChords(chartData)}>Re-record Chords</button>
+                    <button className="btn-ghost" onClick={() => onReRecordMelody(chartData)}>Re-record Melody</button>
+                  </div>
+                ) : (
+                  chartData.sections.length > 1 && (
+                    <span style={{ fontSize: 12, color: 'var(--ink-soft)' }}>Only the last section can be re-recorded for now.</span>
+                  )
+                )}
               </div>
             );
           })}
+
+          <div className="actions-row" style={{ justifyContent: 'flex-start' }}>
+            <button className="btn-primary" onClick={() => onAddSection(chartData)}>+ Add Section</button>
+          </div>
         </>
       )}
     </div>

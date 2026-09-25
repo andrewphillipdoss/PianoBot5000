@@ -44,6 +44,7 @@ function LibraryOnboarding({ status, onChooseFolder, onReconnect }) {
 export default function App() {
   const [screen, setScreen] = useState('songs');
   const [selectedSong, setSelectedSong] = useState(null);
+  const [editSession, setEditSession] = useState(null); // { mode, chartData } while adding a section to / re-recording part of the currently-viewed song
   const library = useSongLibrary();
 
   return (
@@ -71,6 +72,7 @@ export default function App() {
 
         {screen === 'addSong' && (
           <RecordSongFlow
+            mode="newSong"
             onCancel={() => setScreen('songs')}
             saveSong={library.saveSong}
             onSaved={() => setScreen('songs')}
@@ -78,7 +80,39 @@ export default function App() {
         )}
 
         {screen === 'songView' && selectedSong && (
-          <SongView song={selectedSong} onBack={() => setScreen('songs')} />
+          <SongView
+            song={selectedSong}
+            onBack={() => setScreen('songs')}
+            onAddSection={(chartData) => {
+              setEditSession({ mode: 'addSection', chartData });
+              setScreen('editSong');
+            }}
+            onReRecordChords={(chartData) => {
+              setEditSession({ mode: 'reRecordChords', chartData });
+              setScreen('editSong');
+            }}
+            onReRecordMelody={(chartData) => {
+              setEditSession({ mode: 'reRecordMelody', chartData });
+              setScreen('editSong');
+            }}
+          />
+        )}
+
+        {screen === 'editSong' && editSession && (
+          <RecordSongFlow
+            mode={editSession.mode}
+            baseChartData={editSession.chartData}
+            onCancel={() => {
+              setEditSession(null);
+              setScreen('songView');
+            }}
+            saveSong={library.saveSong}
+            onSaved={(freshSummary) => {
+              setEditSession(null);
+              if (freshSummary) setSelectedSong(freshSummary);
+              setScreen('songView');
+            }}
+          />
         )}
 
         {screen === 'midi-test' && <MidiTest />}

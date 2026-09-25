@@ -3,10 +3,26 @@ import './shared.css';
 
 /**
  * Chord-Chart view only for now -- real lead-sheet notation rendering
- * (and the multi-section "Song with N Sections" view) are a
- * deliberately separate, later piece; see the design discussion.
+ * is a deliberately separate, later piece; see the design discussion.
+ *
+ * `onReRecordChords`/`onAddSection` are optional -- omitted entirely
+ * (not just handled as a no-op) when the calling flow doesn't support
+ * them, so the button for it doesn't render at all rather than sitting
+ * there doing nothing (see RecordSongFlow.jsx for which modes omit
+ * which).
  */
-export default function SectionComplete({ title, sectionLabel, keySignature, chordsResult, melodyResult, onReRecordChords, onReRecordMelody, onFinalize }) {
+export default function SectionComplete({
+  title,
+  sectionLabel,
+  keySignature,
+  chordsResult,
+  melodyResult,
+  finalizeLabel = 'Finalize Song',
+  onReRecordChords,
+  onReRecordMelody,
+  onAddSection,
+  onFinalize,
+}) {
   const bars = chordsResult.sectionLengthBeats / 4;
 
   return (
@@ -46,10 +62,11 @@ export default function SectionComplete({ title, sectionLabel, keySignature, cho
 
       <div className="actions-row">
         <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn-ghost" onClick={onReRecordChords}>Re-record Chords</button>
+          {onReRecordChords && <button className="btn-ghost" onClick={onReRecordChords}>Re-record Chords</button>}
           <button className="btn-ghost" onClick={onReRecordMelody}>Re-record Melody</button>
+          {onAddSection && <button className="btn-ghost" onClick={onAddSection}>+ Add Another Section</button>}
         </div>
-        <button className="btn-primary" onClick={onFinalize}>Finalize Song</button>
+        <button className="btn-primary" onClick={onFinalize}>{finalizeLabel}</button>
       </div>
     </div>
   );

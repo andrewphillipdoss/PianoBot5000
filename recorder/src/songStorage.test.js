@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { buildChartData, chartFileName, formatRelativeTime, mergeConsecutiveChordEntries, slugify, summarizeChart } from './songStorage.js';
+import {
+  appendSectionData,
+  buildChartData,
+  chartFileName,
+  emptyChartData,
+  formatRelativeTime,
+  mergeConsecutiveChordEntries,
+  nextSectionLabel,
+  replaceLastSectionData,
+  sectionChordsAsInternal,
+  slugify,
+  summarizeChart,
+} from './songStorage.js';
 
 describe('slugify', () => {
   it('lowercases and dashes spaces/punctuation', () => {
@@ -87,6 +99,125 @@ describe('buildChartData', () => {
       melody: [],
     });
     expect(chart.quantization).toBe(8);
+  });
+});
+
+describe('nextSectionLabel', () => {
+  it('labels sections A, B, C, ... in order recorded', () => {
+    expect(nextSectionLabel(0)).toBe('A');
+    expect(nextSectionLabel(1)).toBe('B');
+    expect(nextSectionLabel(2)).toBe('C');
+  });
+});
+
+describe('appendSectionData', () => {
+  it('lays a second section onto the chart contiguously, right after the first', () => {
+    const chartData = buildChartData({
+      title: 'Two Sections',
+      key: 'C',
+      tempo: 120,
+      sectionLabel: 'A',
+      sectionLengthBeats: 16,
+      chords: [{ rootPitchClass: 0, quality: 'maj', start: 0, end: 16 }],
+      melody: [{ pitch: 60, start: 0, end: 1, velocity: 90 }],
+    });
+
+    const withB = appendSectionData(chartData, {
+      sectionLabel: 'B',
+      sectionLengthBeats: 8,
+      chords: [{ rootPitchClass: 5, quality: 'maj', start: 0, end: 8 }], // section-relative -- starts at its OWN beat 0
+      melody: [{ pitch: 64, start: 0, end: 1, velocity: 80 }],
+    });
+
+    expect(withB.sections).toEqual([
+      { label: 'A', start_beat: 0, end_beat: 16 },
+      { label: 'B', start_beat: 16, end_beat: 24 }, // starts exactly where A ends
+    ]);
+    expect(withB.chords).toEqual([
+      { beat: 0, duration_beats: 16, chord: 'C' },
+      { beat: 16, duration_beats: 8, chord: 'F' }, // offset onto the chart's global timeline
+    ]);
+    expect(withB.melody).toEqual([
+      { beat: 0, duration_beats: 1, pitch: 60, velocity: 90 },
+      { beat: 16, duration_beats: 1, pitch: 64, velocity: 80 },
+    ]);
+  });
+
+  it('lands a pickup note (negative section-relative beat) in the tail of whatever section came before it', () => {
+    const chartData = appendSectionData(emptyChartData({ title: 'T', key: 'C', tempo: 120 }), {
+      sectionLabel: 'A',
+      sectionLengthBeats: 16,
+      chords: [],
+      melody: [],
+    });
+    const withB = appendSectionData(chartData, {
+      sectionLabel: 'B',
+      sectionLengthBeats: 8,
+      chords: [],
+      melody: [{ pitch: 72, start: -2, end: 0, velocity: 90 }], // a pickup note leading into B
+    });
+    // -2 + startBeat(16) = 14 -- inside A's own numeric beat range, which is
+    // exactly correct: that's really when it's played, leading into B's downbeat.
+    expect(withB.melody).toEqual([{ beat: 14, duration_beats: 2, pitch: 72, velocity: 90 }]);
+  });
+});
+
+describe('sectionChordsAsInternal', () => {
+  it('is the exact inverse of what appendSectionData does to a section\'s chords', () => {
+    const internalChords = [
+      { rootPitchClass: 5, quality: 'maj', start: 0, end: 4 },
+      { rootPitchClass: 0, quality: 'min7', start: 4, end: 8 },
+    ];
+    const chartData = appendSectionData(emptyChartData({ title: 'T', key: 'C', tempo: 120 }), {
+      sectionLabel: 'A',
+      sectionLengthBeats: 8,
+      chords: internalChords,
+      melody: [],
+    });
+    // Give it a real offset (a non-zero start_beat) by appending a second section too, then read the FIRST section's chords back.
+    const withB = appendSectionData(chartData, { sectionLabel: 'B', sectionLengthBeats: 8, chords: internalChords, melody: [] });
+
+    expect(sectionChordsAsInternal(withB, withB.sections[0])).toEqual(internalChords);
+    expect(sectionChordsAsInternal(withB, withB.sections[1])).toEqual(internalChords);
+  });
+});
+
+describe('replaceLastSectionData', () => {
+  it('replaces only the last section, leaving earlier sections and their chords/melody untouched', () => {
+    let chartData = buildChartData({
+      title: 'T',
+      key: 'C',
+      tempo: 120,
+      sectionLabel: 'A',
+      sectionLengthBeats: 16,
+      chords: [{ rootPitchClass: 0, quality: 'maj', start: 0, end: 16 }],
+      melody: [{ pitch: 60, start: 0, end: 1, velocity: 90 }],
+    });
+    chartData = appendSectionData(chartData, {
+      sectionLabel: 'B',
+      sectionLengthBeats: 8,
+      chords: [{ rootPitchClass: 5, quality: 'maj', start: 0, end: 8 }],
+      melody: [{ pitch: 64, start: 0, end: 1, velocity: 80 }],
+    });
+
+    const replaced = replaceLastSectionData(chartData, {
+      sectionLengthBeats: 4, // a shorter re-take this time
+      chords: [{ rootPitchClass: 9, quality: 'min', start: 0, end: 4 }],
+      melody: [{ pitch: 69, start: 0, end: 2, velocity: 100 }],
+    });
+
+    expect(replaced.sections).toEqual([
+      { label: 'A', start_beat: 0, end_beat: 16 }, // untouched
+      { label: 'B', start_beat: 16, end_beat: 20 }, // re-recorded, kept its own label, new length
+    ]);
+    expect(replaced.chords).toEqual([
+      { beat: 0, duration_beats: 16, chord: 'C' }, // A's chord, untouched
+      { beat: 16, duration_beats: 4, chord: 'Am' }, // B's new chord
+    ]);
+    expect(replaced.melody).toEqual([
+      { beat: 0, duration_beats: 1, pitch: 60, velocity: 90 }, // A's melody, untouched
+      { beat: 16, duration_beats: 2, pitch: 69, velocity: 100 }, // B's new melody
+    ]);
   });
 });
 

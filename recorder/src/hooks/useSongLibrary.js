@@ -74,12 +74,22 @@ export function useSongLibrary() {
     }
   }, [dirHandle]);
 
-  /** Save a song's chart data, keyed by its own title -> filename. */
+  /**
+   * Save a song's chart data, keyed by its own title -> filename.
+   * Returns the freshly-listed summary for the song just saved (a new
+   * object, with a current fileHandle/updatedAt) -- callers that need
+   * to keep showing this exact song right after saving (re-recording
+   * or adding a section from within SongView) use this instead of
+   * whatever summary they had before, which is now stale.
+   */
   const saveSong = useCallback(
     async (chartData) => {
       if (!dirHandle) throw new Error('no songs folder chosen yet');
-      await writeChartFile(dirHandle, chartFileName(chartData.title), chartData);
-      setSongs(await listSongs(dirHandle));
+      const fileName = chartFileName(chartData.title);
+      await writeChartFile(dirHandle, fileName, chartData);
+      const freshSongs = await listSongs(dirHandle);
+      setSongs(freshSongs);
+      return freshSongs.find((s) => s.fileName === fileName) ?? null;
     },
     [dirHandle]
   );

@@ -10,6 +10,7 @@ import {
   roundToBarInterval,
   secondsToBeats,
   trimTrailingEmptyBars,
+  voiceChordSimple,
 } from './theory.js';
 
 describe('formatChordSymbol', () => {
@@ -102,6 +103,20 @@ describe('detectChordQuality', () => {
 
   it('returns null for 5 or more distinct pitch classes (outside this app\'s recognized vocabulary)', () => {
     expect(detectChordQuality([0, 2, 4, 7, 10])).toBeNull();
+  });
+});
+
+describe('voiceChordSimple', () => {
+  it('stacks a major triad from the root', () => {
+    expect(voiceChordSimple(0, 'maj')).toEqual([48, 52, 55]); // C3, E3, G3
+  });
+
+  it('stacks a dominant 7th (4 notes)', () => {
+    expect(voiceChordSimple(7, 'dom7')).toEqual([55, 59, 62, 65]); // G3, B3, D4, F4
+  });
+
+  it('returns an empty voicing for an unrecognized quality', () => {
+    expect(voiceChordSimple(0, 'nonsense')).toEqual([]);
   });
 });
 
@@ -228,6 +243,25 @@ describe('messagesToNotes', () => {
       { timestamp: 0.5, type: 'noteon', note: 60, velocity: 0 },
     ];
     expect(messagesToNotes(messages)).toEqual([{ pitch: 60, start: 0.0, end: 0.5, velocity: 90 }]);
+  });
+
+  it('closes a still-held note at endTimestamp -- the normal case when a recording stops mid-chord', () => {
+    const messages = [
+      { timestamp: 0.0, type: 'noteon', note: 48, velocity: 90 },
+      { timestamp: 0.0, type: 'noteon', note: 52, velocity: 90 },
+      { timestamp: 0.0, type: 'noteon', note: 55, velocity: 90 },
+      // ...no note-offs at all: the chord was still held when the pass ended.
+    ];
+    expect(messagesToNotes(messages, 4.0)).toEqual([
+      { pitch: 48, start: 0.0, end: 4.0, velocity: 90 },
+      { pitch: 52, start: 0.0, end: 4.0, velocity: 90 },
+      { pitch: 55, start: 0.0, end: 4.0, velocity: 90 },
+    ]);
+  });
+
+  it('drops a still-held note entirely when no endTimestamp is given (the old, default behavior)', () => {
+    const messages = [{ timestamp: 0.0, type: 'noteon', note: 60, velocity: 90 }];
+    expect(messagesToNotes(messages)).toEqual([]);
   });
 
   it('closes a stuck note when the same pitch is struck again', () => {

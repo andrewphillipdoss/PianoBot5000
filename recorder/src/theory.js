@@ -187,6 +187,22 @@ export function trimTrailingEmptyBars(totalBeats, chordOnsetsBeats, beatsPerBar 
   return keptBars * beatsPerBar;
 }
 
+const DEFAULT_VOICING_BASE_MIDI = 48; // C3
+
+/**
+ * A plain close-position voicing (root, third, fifth[, seventh]) for
+ * a detected chord -- not the arranger's voice-leading logic (that
+ * chooses inversions to minimize movement between chords), just
+ * enough to make a recorded chord audible when it plays back during
+ * the melody pass.
+ */
+export function voiceChordSimple(rootPitchClass, quality, baseOctaveMidi = DEFAULT_VOICING_BASE_MIDI) {
+  const intervals = TRIAD_INTERVALS[quality] ?? SEVENTH_INTERVALS[quality];
+  if (!intervals) return [];
+  const rootMidi = baseOctaveMidi + rootPitchClass;
+  return intervals.map((interval) => rootMidi + interval);
+}
+
 /** Round a beat length to the nearest multiple of `intervalBars` bars (default: 4). */
 export function roundToBarInterval(beats, intervalBars = 4, beatsPerBar = 4) {
   const step = intervalBars * beatsPerBar;
@@ -203,8 +219,15 @@ export function roundToBarInterval(beats, intervalBars = 4, beatsPerBar = 4) {
  * latter). A note-on for a pitch that's already sounding implicitly
  * closes the previous one at the new onset, rather than crashing on a
  * stuck/duplicate note-on.
+ *
+ * `endTimestamp`, if given, closes out any note still held when the
+ * stream ends -- e.g. recording stopped while a chord was still
+ * physically held down, which is the normal case, not an edge case:
+ * without this, a note that never got an explicit note-off is
+ * silently dropped entirely rather than ending at the true capture
+ * boundary, which would lose the last chord of every take.
  */
-export function messagesToNotes(messages) {
+export function messagesToNotes(messages, endTimestamp = null) {
   const open = new Map(); // pitch -> {onset, velocity}
   const notes = [];
 
@@ -220,6 +243,12 @@ export function messagesToNotes(messages) {
       const { onset, velocity: v } = open.get(note);
       if (timestamp > onset) notes.push({ pitch: note, start: onset, end: timestamp, velocity: v });
       open.delete(note);
+    }
+  }
+
+  if (endTimestamp !== null) {
+    for (const [pitch, { onset, velocity }] of open) {
+      if (endTimestamp > onset) notes.push({ pitch, start: onset, end: endTimestamp, velocity });
     }
   }
 

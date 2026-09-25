@@ -1,42 +1,75 @@
 import { useState } from 'react';
+import { useSongLibrary } from './hooks/useSongLibrary.js';
 import MainSongs from './screens/MainSongs.jsx';
 import MidiTest from './screens/MidiTest.jsx';
+import RecordSongFlow from './screens/RecordSongFlow.jsx';
+import './screens/shared.css';
 
-// Placeholder data matching the design wireframe, until real song
-// storage (via the File System Access API) is wired up -- see
-// recorder/README.md for the build sequence this is the first step of.
-const PLACEHOLDER_SONGS = [
-  { title: "The Blood Will Never Lose Its Power", key: 'Ab', tempo: 72, sectionLabels: ['A', 'B'], updatedAt: '2 days ago' },
-  { title: 'Hallelujah', key: 'C', tempo: 68, sectionLabels: ['A', 'B', 'C'], updatedAt: '5 days ago' },
-  { title: 'Amazing Grace', key: 'C', tempo: 76, sectionLabels: ['A'], updatedAt: '1 week ago' },
-  { title: 'Auld Lang Syne', key: 'G', tempo: 100, sectionLabels: ['A', 'B'], updatedAt: '2 weeks ago' },
-  { title: "Why Can't We Be Friends?", key: 'Bb', tempo: 96, sectionLabels: ['A'], updatedAt: '3 weeks ago' },
-  { title: 'Georgia on My Mind', key: 'G', tempo: 66, sectionLabels: ['A (chords only)'], updatedAt: '1 month ago' },
-];
+const NAV_STYLE = { display: 'flex', gap: 16, padding: '12px 40px 0', fontSize: 13 };
 
-// Temporary until real routing/screens exist -- lets the MIDI
-// diagnostic screen be reached without losing the "My Songs" screen.
+function navLinkStyle(active) {
+  return { background: 'none', border: 'none', cursor: 'pointer', color: active ? 'var(--accent-dark)' : 'var(--ink-soft)', fontWeight: active ? 600 : 400 };
+}
+
+function LibraryOnboarding({ status, onChooseFolder, onReconnect }) {
+  if (status === 'unsupported') {
+    return (
+      <div style={{ maxWidth: 480, margin: '80px auto', padding: 24, textAlign: 'center', color: 'var(--ink-soft)' }}>
+        This app needs the File System Access API and Web MIDI, both Chrome-only -- open it in Chrome (or another Chromium-based browser) instead.
+      </div>
+    );
+  }
+  if (status === 'checking') {
+    return <div style={{ maxWidth: 480, margin: '80px auto', padding: 24, textAlign: 'center', color: 'var(--ink-soft)' }}>Checking for your songs folder...</div>;
+  }
+  if (status === 'needsPermission') {
+    return (
+      <div style={{ maxWidth: 480, margin: '80px auto', padding: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <p style={{ color: 'var(--ink-soft)' }}>Reconnect your songs folder to keep reading/writing your recorded songs.</p>
+        <button className="btn-primary" onClick={onReconnect} style={{ alignSelf: 'center' }}>Reconnect songs folder</button>
+      </div>
+    );
+  }
+  // needsFolder
+  return (
+    <div style={{ maxWidth: 480, margin: '80px auto', padding: 24, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <p style={{ color: 'var(--ink-soft)' }}>Choose a folder to store your recorded songs as chart files -- the same format the CLI reads.</p>
+      <button className="btn-primary" onClick={onChooseFolder} style={{ alignSelf: 'center' }}>Choose songs folder</button>
+    </div>
+  );
+}
+
 export default function App() {
   const [screen, setScreen] = useState('songs');
+  const library = useSongLibrary();
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 16, padding: '12px 40px 0', fontSize: 13 }}>
-        <button onClick={() => setScreen('songs')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: screen === 'songs' ? 'var(--accent-dark)' : 'var(--ink-soft)', fontWeight: screen === 'songs' ? 600 : 400 }}>
-          My Songs
-        </button>
-        <button onClick={() => setScreen('midi-test')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: screen === 'midi-test' ? 'var(--accent-dark)' : 'var(--ink-soft)', fontWeight: screen === 'midi-test' ? 600 : 400 }}>
-          MIDI Test (dev)
-        </button>
+      <div style={NAV_STYLE}>
+        <button onClick={() => setScreen('songs')} style={navLinkStyle(screen === 'songs')}>My Songs</button>
+        <button onClick={() => setScreen('midi-test')} style={navLinkStyle(screen === 'midi-test')}>MIDI Test (dev)</button>
       </div>
 
-      {screen === 'songs' && (
+      {screen === 'songs' && library.status !== 'ready' && (
+        <LibraryOnboarding status={library.status} onChooseFolder={library.chooseFolder} onReconnect={library.reconnectFolder} />
+      )}
+
+      {screen === 'songs' && library.status === 'ready' && (
         <MainSongs
-          songs={PLACEHOLDER_SONGS}
-          onAddSong={() => setScreen('midi-test')}
-          onOpenSong={(song) => console.log('open song', song)}
+          songs={library.songs}
+          onAddSong={() => setScreen('addSong')}
+          onOpenSong={(song) => console.log('open song (viewing an existing song is not built yet)', song)}
         />
       )}
+
+      {screen === 'addSong' && (
+        <RecordSongFlow
+          onCancel={() => setScreen('songs')}
+          saveSong={library.saveSong}
+          onSaved={() => setScreen('songs')}
+        />
+      )}
+
       {screen === 'midi-test' && <MidiTest />}
     </div>
   );

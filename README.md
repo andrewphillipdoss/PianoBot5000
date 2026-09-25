@@ -50,8 +50,18 @@ pip install pianobot5000
 
 That's it -- the chart-based path needs nothing beyond `pretty_midi`,
 `typer`, and `rich`. No torch, no audio libraries, nothing to compile,
-no Docker. (Transcribe mode has its own, much heavier install story --
-see its own section below.)
+no Docker required. If you'd rather run it in a container anyway (for
+consistency with the transcribe-mode workflow below, say), there's a
+plain `Dockerfile` for exactly this lightweight path:
+
+```bash
+docker build -t pianobot5000 .
+docker run --rm -v "$(pwd)/data:/data" -w /data pianobot5000 \
+    pianobot chart practice-changes.json -o out.mid
+```
+
+(Transcribe mode has its own, much heavier install story -- see its
+own section below, including its own `Dockerfile.transcribe`.)
 
 ## Usage
 

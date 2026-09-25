@@ -26,15 +26,41 @@ from . import assemble as assemble_stage
 from .charts import simple_format
 from .charts.arrange import render_to_midi_inputs
 from .charts.transpose import transpose_chart
-from .transcribe.cli import app as transcribe_app
 
 app = typer.Typer(add_completion=False, help="Turn a chord/melody chart into a piano-arrangement MIDI file.")
 console = Console()
 
-app.add_typer(
-    transcribe_app, name="transcribe",
-    help="Legacy audio-transcription pipeline (Demucs/Basic Pitch/Chordino/allin1).",
-)
+# Transcribe mode's own modules import numpy/soundfile (and, deeper in,
+# torch/demucs/basic-pitch/vamp/allin1) at module load time -- none of
+# which are part of this package's base dependencies any more (see
+# pyproject.toml), so a lightweight chart-only install won't have them.
+# Guard the import so that's a friendly error on `pianobot transcribe
+# ...` specifically, not an ugly traceback that takes down `pianobot
+# chart` too just because it's the same executable.
+try:
+    from .transcribe.cli import app as transcribe_app
+except ImportError as exc:
+    transcribe_app = None
+    _transcribe_import_error = exc
+
+if transcribe_app is not None:
+    app.add_typer(
+        transcribe_app, name="transcribe",
+        help="Legacy audio-transcription pipeline (Demucs/Basic Pitch/Chordino/allin1).",
+    )
+else:
+    @app.command(
+        name="transcribe",
+        context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    )
+    def transcribe_unavailable() -> None:
+        """Not installed -- see README's "Transcribe mode" section."""
+        console.print(
+            "[red]Transcribe mode isn't installed.[/red] It needs its own "
+            r"(much heavier) dependencies -- run: pip install 'pianobot5000\[transcribe]' "
+            f"(missing: {_transcribe_import_error.name})"
+        )
+        raise typer.Exit(code=1)
 
 
 @app.command()

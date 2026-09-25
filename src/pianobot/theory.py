@@ -16,8 +16,11 @@ C); a pitch class is just `pitch % 12`.
 from __future__ import annotations
 
 import re
+# `string.ascii_uppercase` is just the literal text "ABCDEFG...Z",
+# handed out one letter at a time in label_repeats() below.
+import string
 
-from .types import ChordEvent, NoteEvent
+from .types import ChordEvent, NoteEvent, Section
 
 # Every note name we might need to parse (including enharmonic
 # spellings -- e.g. C# and Db are the same physical note, just written
@@ -220,6 +223,52 @@ def transpose_notes(notes: list[NoteEvent], semitones: int) -> list[NoteEvent]:
         NoteEvent(pitch=n.pitch + semitones, start=n.start, end=n.end, velocity=n.velocity)
         for n in notes
     ]
+
+
+def label_repeats(sections: list[Section]) -> list[Section]:
+    """Assign A/B/C/... letters to sections, reusing a letter whenever
+    a section's source label (e.g. "chorus", or a rehearsal mark's
+    text) repeats. Used by both the audio-transcription path (allin1's
+    segment labels) and the MusicXML importer (rehearsal marks) -- pure
+    Section-in/Section-out logic, no audio or notation dependency.
+    """
+    letters = iter(string.ascii_uppercase)
+    assigned: dict[str, str] = {}
+    labeled: list[Section] = []
+    for section in sections:
+        key = section.source_label or "?"
+        if key not in assigned:
+            assigned[key] = next(letters, key)
+        labeled.append(Section(start=section.start, end=section.end, label=assigned[key], source_label=key))
+    return labeled
+
+
+def quality_from_chord_symbol(root_pitch_class: int, third_pitch_class: int | None, fifth_pitch_class: int | None) -> str:
+    """Bucket a chord down to maj/min/dim/aug from its *actual* pitches,
+    given as pitch classes (0-11) -- not from a chord-symbol library's
+    "kind" label, which can be misleading. E.g. music21 parses "Bm7b5"
+    (a common way to write a half-diminished chord) with
+    ``chordKind == "minor-seventh"``, storing the flatted 5th as a
+    separate alteration rather than changing the kind string -- so
+    trusting the kind text alone would misclassify it as a plain minor
+    triad instead of the diminished-shaped triad it actually is.
+    Working from the real third/fifth intervals (verified against
+    music21's own computed pitches) sidesteps that entirely.
+    """
+    if third_pitch_class is None:
+        # No 3rd at all (sus chords, bare power chords, ...) -- nothing
+        # to judge major/minor from; default to major, the same
+        # simplification every other chord-symbol parser here makes.
+        return "maj"
+    third_interval = (third_pitch_class - root_pitch_class) % 12
+    fifth_interval = (fifth_pitch_class - root_pitch_class) % 12 if fifth_pitch_class is not None else 7
+    if (third_interval, fifth_interval) == TRIAD_INTERVALS["aug"][1:]:
+        return "aug"
+    if (third_interval, fifth_interval) == TRIAD_INTERVALS["dim"][1:]:
+        return "dim"
+    if third_interval == TRIAD_INTERVALS["min"][1]:
+        return "min"
+    return "maj"
 
 
 def key_semitone_offset(from_key: str, to_key: str) -> int:

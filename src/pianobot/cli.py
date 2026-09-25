@@ -23,9 +23,12 @@ import typer
 from rich.console import Console
 
 from . import assemble as assemble_stage
-from .charts import simple_format
+from .charts import musicxml_format, simple_format
 from .charts.arrange import render_to_midi_inputs
 from .charts.transpose import transpose_chart
+from .types import Chart
+
+_MUSICXML_SUFFIXES = {".musicxml", ".xml", ".mxl"}
 
 app = typer.Typer(add_completion=False, help="Turn a chord/melody chart into a piano-arrangement MIDI file.")
 console = Console()
@@ -63,9 +66,23 @@ else:
         raise typer.Exit(code=1)
 
 
+def _load_chart(chart_file: Path) -> Chart:
+    """Dispatch to the right importer by file extension. Both
+    importers produce the exact same Chart shape, so nothing past this
+    point in `chart()` needs to know or care which one ran.
+    """
+    if chart_file.suffix.lower() in _MUSICXML_SUFFIXES:
+        try:
+            return musicxml_format.load_chart(chart_file)
+        except musicxml_format.Music21Unavailable as exc:
+            console.print(f"[red]Can't read a MusicXML chart:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+    return simple_format.load_chart(chart_file)
+
+
 @app.command()
 def chart(
-    chart_file: Path = typer.Argument(..., exists=True, help="Chart JSON file, e.g. examples/practice-changes.json"),
+    chart_file: Path = typer.Argument(..., exists=True, help="Chart file: JSON (examples/practice-changes.json) or MusicXML (.musicxml/.xml/.mxl)."),
     output: Path = typer.Option(None, "-o", "--output", help="Output MIDI path. Defaults to <chart-stem>.mid"),
     key: str = typer.Option(None, "--key", help="Transpose to this key before rendering, e.g. --key Eb. Defaults to the chart's own key."),
     style: str = typer.Option("simple", "--style", help="Left-hand arrangement style. Only 'simple' (block triads) is implemented so far."),
@@ -73,7 +90,7 @@ def chart(
 ) -> None:
     """Render a chart to a piano-arrangement MIDI file."""
     output = output or chart_file.with_suffix(".mid")
-    loaded = simple_format.load_chart(chart_file)
+    loaded = _load_chart(chart_file)
     if key:
         loaded = transpose_chart(loaded, key)
     if tempo is not None:

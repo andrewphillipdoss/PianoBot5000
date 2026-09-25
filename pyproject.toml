@@ -43,7 +43,12 @@ transcribe-chords = ["vamp>=1.1.0"]
 # actual fix.
 transcribe-structure = ["allin1>=0.1", "madmom @ git+https://github.com/CPJKU/madmom.git"]
 transcribe = ["pianobot5000[transcribe-stems,transcribe-melody,transcribe-chords,transcribe-structure]"]
-dev = ["pytest>=8.0"]
+# A second, much lighter chart-source importer: reads a MusicXML lead
+# sheet (chords + melody) into a Chart instead of requiring one to be
+# hand-written as JSON. music21 is a real dependency (not tiny), so
+# it's its own extra rather than part of the base install.
+charts-musicxml = ["music21>=9.1"]
+dev = ["pytest>=8.0", "pianobot5000[charts-musicxml]"]
 
 [project.scripts]
 pianobot = "pianobot.cli:app"

@@ -17,12 +17,17 @@ song's rhythm and form:
 
 from __future__ import annotations
 
-# `string` is a small standard-library module of string constants;
-# we only use `string.ascii_uppercase`, the literal text "ABCDEFG...Z".
-import string
 from pathlib import Path
 
+from ..theory import label_repeats
 from ..types import Beat, Section
+
+# `label_repeats` itself moved to theory.py -- it's pure Section-in/
+# Section-out logic with no audio dependency at all, and the chart-
+# based path's MusicXML importer needs the exact same A/B/C-grouping
+# behavior for rehearsal marks. Imported (not just called) here so
+# existing callers can keep writing `structure_stage.label_repeats(...)`
+# unchanged.
 
 
 class Allin1Unavailable(RuntimeError):
@@ -66,41 +71,3 @@ def analyze_structure(audio_path: Path) -> tuple[list[Beat], list[Section]]:
         for seg in result.segments
     ]
     return beats, sections
-
-
-def label_repeats(sections: list[Section]) -> list[Section]:
-    """Assign A/B/C/... letters to sections, reusing a letter whenever
-    a section's source label (e.g. "chorus") repeats -- the diagram's
-    "Label A/B/C: group repeats" box.
-    """
-    # `iter(string.ascii_uppercase)` turns the string "ABCDEFG...Z"
-    # into an *iterator*: something you can repeatedly ask "give me the
-    # next item" via `next(...)`, remembering where it left off each
-    # time. This is a convenient way to hand out letters one at a time
-    # as we discover new section types, without manually tracking an
-    # index.
-    letters = iter(string.ascii_uppercase)
-    # A dictionary remembering which letter we've already assigned to
-    # each distinct source_label, e.g. {"verse": "A", "chorus": "B"}.
-    # The first time we see a given label, we assign it the next
-    # available letter; every later section with that same label reuses it.
-    assigned: dict[str, str] = {}
-    labeled: list[Section] = []
-    for section in sections:
-        # Fall back to the literal string "?" for any section that
-        # somehow has no source_label at all, so we still produce a
-        # (single, consistent) letter for it rather than crashing.
-        key = section.source_label or "?"
-        if key not in assigned:
-            # `next(letters, key)` asks the letters iterator for the
-            # next unused letter; if we've somehow run past "Z" (more
-            # than 26 distinct section types -- extremely unlikely),
-            # the second argument `key` is used as a fallback default
-            # instead of crashing.
-            assigned[key] = next(letters, key)
-        # Build a *new* Section (rather than mutating the one we were
-        # given) with the same start/end but now with `label` filled
-        # in. Dataclasses instances are easiest to reason about when
-        # treated as immutable "snapshots" like this.
-        labeled.append(Section(start=section.start, end=section.end, label=assigned[key], source_label=key))
-    return labeled

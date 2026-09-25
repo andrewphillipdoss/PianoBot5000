@@ -113,6 +113,31 @@ redistribution license (e.g. community iReal Pro playlists) is
 something to parse for personal practice use rather than to bundle
 into this repo directly.
 
+### Importing from MusicXML (sheet music)
+
+Already have a lead sheet as sheet music (a MuseScore/Finale/Sibelius/
+Dorico export, or a purchased fake book file) rather than something
+you'd hand-type? `pianobot chart` reads `.musicxml`/`.xml`/`.mxl` files
+directly, using the same `Chart` shape underneath:
+
+```bash
+pip install "pianobot5000[charts-musicxml]"   # pulls in music21
+pianobot chart my-lead-sheet.musicxml -o out.mid
+```
+
+It reads the chord symbols and melody straight off the score (merging
+tied notes into one held note, correctly bucketing altered chords like
+`Bm7b5` as diminished rather than trusting a possibly-misleading
+"kind" label), the key and tempo from the score's own markings, and
+song sections from rehearsal marks if the score has any (one whole
+section otherwise -- there's no attempt to guess song form from the
+music itself). See `pianobot/charts/musicxml_format.py`'s docstring for
+the exact scope/limitations (only the first part is read, repeat signs
+aren't expanded, grace notes are skipped). This is meant for sheet
+music you already have legal access to -- your own scores, a purchased
+export -- the same spirit as writing a chart by hand, just starting
+from notation software's export instead.
+
 ### Transposing without rendering
 
 Transposition is a pure pitch-class/MIDI-pitch shift (see
@@ -133,7 +158,10 @@ pytest
 Everything is unit tested without needing any model, plugin binary, or
 audio file: chart JSON parsing, transposition, beats->seconds
 rendering, chord-symbol/Harte-label parsing, triad voicing/voice
-leading, section labeling, and MIDI assembly.
+leading, section labeling, MIDI assembly, and the MusicXML importer
+(built from music21 objects assembled directly in the test, no actual
+sheet-music file needed -- these skip themselves if `music21` isn't
+installed, since it's its own extra).
 
 ---
 

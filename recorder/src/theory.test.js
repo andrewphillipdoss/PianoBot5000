@@ -3,6 +3,7 @@ import {
   clusterOnsets,
   detectChordQuality,
   detectChords,
+  formatChordSymbol,
   messagesToNotes,
   midiNoteName,
   quantizeNotes,
@@ -10,6 +11,18 @@ import {
   secondsToBeats,
   trimTrailingEmptyBars,
 } from './theory.js';
+
+describe('formatChordSymbol', () => {
+  it('writes a major triad as just the root letter', () => {
+    expect(formatChordSymbol(0, 'maj')).toBe('C');
+  });
+
+  it('writes minor/diminished/augmented with their usual suffixes', () => {
+    expect(formatChordSymbol(0, 'min')).toBe('Cm');
+    expect(formatChordSymbol(6, 'dim')).toBe('F#dim');
+    expect(formatChordSymbol(4, 'aug')).toBe('Eaug');
+  });
+});
 
 describe('midiNoteName', () => {
   it('names middle C (60) as C4, per MIDI convention', () => {

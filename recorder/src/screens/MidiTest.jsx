@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMidiInput } from '../hooks/useMidiInput.js';
-import { enableAudio, playNote, stopNote } from '../pianoSynth.js';
-import { midiNoteName } from '../theory.js';
+import { enableAudio, playNote, stopAllNotes, stopNote } from '../pianoSynth.js';
+import { detectChordQuality, formatChordSymbol, midiNoteName } from '../theory.js';
 import './MidiTest.css';
 
 /**
@@ -26,6 +26,19 @@ export default function MidiTest() {
     if (newest.type === 'noteon' && newest.velocity > 0) playNote(newest.note, newest.velocity);
     else stopNote(newest.note);
   }, [events, soundOn]);
+
+  // Only recognizes plain triads (this app's current voicing scope --
+  // see theory.js) from whichever pitch classes are currently held,
+  // octave doublings collapsed and ignored, lowest held note as the
+  // tiebreaking bass for the one real ambiguity (an augmented triad).
+  const heldChord = useMemo(() => {
+    const held = [...heldNotes];
+    const pitchClasses = held.map((p) => p % 12);
+    const distinctCount = new Set(pitchClasses).size;
+    if (distinctCount !== 3) return { chord: null, distinctCount };
+    const bassPitchClass = held.reduce((min, p) => Math.min(min, p), Infinity) % 12;
+    return { chord: detectChordQuality(pitchClasses, bassPitchClass), distinctCount };
+  }, [heldNotes]);
 
   if (!supported) {
     return (
@@ -63,10 +76,16 @@ export default function MidiTest() {
         <span className="midi-test__panel-label">Sound feedback</span>
         <button
           className="midi-test__select"
-          onClick={() => enableAudio().then(() => setSoundOn(true))}
-          disabled={soundOn}
+          onClick={() => {
+            if (soundOn) {
+              stopAllNotes();
+              setSoundOn(false);
+            } else {
+              enableAudio().then(() => setSoundOn(true));
+            }
+          }}
         >
-          {soundOn ? 'Sound on' : 'Enable sound'}
+          {soundOn ? 'Sound on (tap to mute)' : 'Enable sound'}
         </button>
       </div>
 
@@ -96,6 +115,20 @@ export default function MidiTest() {
               ))
           )}
         </div>
+      </div>
+
+      <div className="midi-test__panel">
+        <span className="midi-test__panel-label">Chord</span>
+        {heldChord.chord ? (
+          <span className="midi-test__chord-symbol">{formatChordSymbol(heldChord.chord.rootPitchClass, heldChord.chord.quality)}</span>
+        ) : (
+          <span className="midi-test__chord-hint">
+            {heldChord.distinctCount === 0 && 'Hold a triad (3 notes)...'}
+            {heldChord.distinctCount > 0 && heldChord.distinctCount < 3 && `${heldChord.distinctCount} of 3 notes held`}
+            {heldChord.distinctCount === 3 && "Not a recognizable triad -- check for a wrong/extra note"}
+            {heldChord.distinctCount > 3 && `${heldChord.distinctCount} distinct notes held -- only plain triads are recognized`}
+          </span>
+        )}
       </div>
 
       <div className="midi-test__panel">

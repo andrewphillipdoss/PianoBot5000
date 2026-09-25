@@ -68,6 +68,18 @@
   border-radius: 8px;
 }
 
+.midi-test__chord-symbol {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 600;
+  font-size: 40px;
+  color: var(--accent-dark);
+}
+
+.midi-test__chord-hint {
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
 .midi-test__held-empty {
   color: var(--ink-soft);
   font-size: 14px;

@@ -28,6 +28,13 @@ export function midiNoteName(pitch) {
   return `${NOTE_NAMES[pitch % 12]}${octave}`;
 }
 
+const QUALITY_SUFFIX = { maj: '', min: 'm', dim: 'dim', aug: 'aug' };
+
+/** (root pitch class, quality) -> a plain lead-sheet chord symbol, e.g. (0, "min") -> "Cm". */
+export function formatChordSymbol(rootPitchClass, quality) {
+  return `${NOTE_NAMES[rootPitchClass]}${QUALITY_SUFFIX[quality] ?? quality}`;
+}
+
 /**
  * The reverse of chord voicing: given the pitch classes actually
  * played (0-11, octave-independent) plus optionally which one was the

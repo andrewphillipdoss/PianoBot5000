@@ -65,6 +65,13 @@ export function playNote(pitch, velocity = 90) {
   activeVoices.set(pitch, { oscillators, master });
 }
 
+/** Silence everything currently sounding, e.g. when sound feedback is toggled off. */
+export function stopAllNotes(releaseSeconds = 0.05) {
+  for (const pitch of [...activeVoices.keys()]) {
+    stopNote(pitch, releaseSeconds);
+  }
+}
+
 export function stopNote(pitch, releaseSeconds = 0.15) {
   const voice = activeVoices.get(pitch);
   if (!voice || !audioContext) return;

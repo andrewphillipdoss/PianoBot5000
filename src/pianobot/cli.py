@@ -1,7 +1,7 @@
 """The `pianobot` command-line tool.
 
 Commands:
-  pianobot chart CHART_FILE [-o OUT] [--key KEY] [--style STYLE] [--tempo BPM]
+  pianobot chart CHART_FILE [-o OUT] [--key KEY] [--style STYLE] [--tempo BPM] [--no-humanize] [--seed N]
       The primary path: render a hand-authored (or imported) chord/
       melody chart straight to a piano-arrangement MIDI file. No audio,
       no ML models -- see examples/practice-changes.json for the chart
@@ -90,8 +90,10 @@ def chart(
     chart_file: Path = typer.Argument(..., exists=True, help="Chart file: JSON (examples/practice-changes.json) or MusicXML (.musicxml/.xml/.mxl)."),
     output: Path = typer.Option(None, "-o", "--output", help="Output MIDI path. Defaults to <chart-stem>.mid"),
     key: str = typer.Option(None, "--key", help="Transpose to this key before rendering, e.g. --key Eb. Defaults to the chart's own key."),
-    style: str = typer.Option("simple", "--style", help="Left-hand arrangement style. Only 'simple' (block triads) is implemented so far."),
+    style: str = typer.Option("simple", "--style", help="Left-hand arrangement style: 'simple' (sustained block triads) or 'comping' (a rhythmic Charleston-style comping pattern instead of one static block chord)."),
     tempo: float = typer.Option(None, "--tempo", help="Override the chart's own tempo (BPM)."),
+    humanize: bool = typer.Option(True, "--humanize/--no-humanize", help="Add small, deterministic timing/velocity variation so the render doesn't sound perfectly quantized. On by default."),
+    seed: int = typer.Option(0, "--seed", help="Random seed for --humanize -- same chart + same seed always renders identically."),
 ) -> None:
     """Render a chart to a piano-arrangement MIDI file."""
     output = output or chart_file.with_suffix(".mid")
@@ -103,7 +105,7 @@ def chart(
 
     console.print(f"[bold]PianoBot5000[/bold]: {chart_file} ({loaded.title!r}, key {loaded.key}) -> {output}")
 
-    melody_notes, chord_notes, sections = render_to_midi_inputs(loaded, style=style)
+    melody_notes, chord_notes, sections = render_to_midi_inputs(loaded, style=style, humanize=humanize, seed=seed)
     pm = assemble_stage.assemble_midi(melody_notes, chord_notes, sections, tempo=loaded.tempo)
     result_path = assemble_stage.write_midi(pm, output)
 

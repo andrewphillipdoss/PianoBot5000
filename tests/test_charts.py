@@ -85,7 +85,9 @@ def test_transpose_chart_to_the_same_key_is_a_no_op():
 
 def test_render_to_midi_inputs_converts_beats_to_seconds():
     chart = chart_from_dict(_EXAMPLE)  # tempo=120 -> 0.5 seconds per beat
-    melody_notes, chord_notes, sections = render_to_midi_inputs(chart)
+    # humanize=False here so the assertions below can check exact
+    # values -- humanization's own behavior is covered separately.
+    melody_notes, chord_notes, sections = render_to_midi_inputs(chart, humanize=False)
 
     assert melody_notes[0].start == pytest.approx(0.0)
     assert melody_notes[0].end == pytest.approx(0.5)
@@ -103,3 +105,37 @@ def test_render_to_midi_inputs_rejects_unknown_style():
     chart = chart_from_dict(_EXAMPLE)
     with pytest.raises(ValueError):
         render_to_midi_inputs(chart, style="walking-bass")
+
+
+def test_render_to_midi_inputs_comping_style_produces_more_chord_hits():
+    # The bundled example is one 4-beat chord -- "simple" sustains it as
+    # one block (3 notes), "comping" breaks it into the Charleston cell's
+    # 4 rhythmic hits (12 notes): the actual fix for a static, unfelt
+    # left hand.
+    chart = chart_from_dict(_EXAMPLE)
+    _, simple_chords, _ = render_to_midi_inputs(chart, style="simple", humanize=False)
+    _, comping_chords, _ = render_to_midi_inputs(chart, style="comping", humanize=False)
+
+    assert len(simple_chords) == 3
+    assert len(comping_chords) == 12
+    assert len({n.start for n in comping_chords}) == 4
+
+
+def test_render_to_midi_inputs_humanize_is_deterministic_for_a_given_seed():
+    chart = chart_from_dict(_EXAMPLE)
+    a = render_to_midi_inputs(chart, humanize=True, seed=5)
+    b = render_to_midi_inputs(chart, humanize=True, seed=5)
+    assert a[0] == b[0]  # melody_notes
+    assert a[1] == b[1]  # chord_notes
+
+
+def test_render_to_midi_inputs_humanize_nudges_notes_off_the_exact_grid():
+    chart = chart_from_dict(_EXAMPLE)
+    _, quantized_chords, _ = render_to_midi_inputs(chart, humanize=False)
+    _, humanized_chords, _ = render_to_midi_inputs(chart, humanize=True, seed=1)
+
+    # At least one note's start should have moved off the dead-exact
+    # beat-grid value -- the whole point of humanizing.
+    assert any(
+        h.start != q.start for h, q in zip(humanized_chords, quantized_chords)
+    )

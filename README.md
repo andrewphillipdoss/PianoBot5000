@@ -71,10 +71,36 @@ pianobot chart examples/practice-changes.json -o out.mid
 
 Options: `--key Eb` (transpose to a different key before rendering --
 defaults to the chart's own key), `--tempo 96` (override the chart's
-own tempo), `--style simple` (left-hand arrangement style -- only
-`simple`, plain voice-led block triads, is implemented so far; see
-`charts/arrange.py`'s docstring for where more styles like a comping
-rhythm or a walking bass line would plug in later).
+own tempo), `--style simple|comping` (left-hand arrangement style --
+`simple` is plain voice-led block triads, one sustained chord per
+change; `comping` plays the same voicings as a rhythmic "Charleston"
+pattern -- hit on beat 1, hit on the "and" of beat 2 -- instead of one
+static block, which is the main fix for a left hand that otherwise
+sounds flat/mechanical over anything longer than a beat or two),
+`--no-humanize` (turn off the small randomized timing/velocity
+variation applied by default -- see below), `--seed 3` (change the
+humanization seed; the same chart + seed always renders identically).
+See `charts/arrange.py`'s docstring for where more styles like a
+walking bass line would plug in later.
+
+### Why the default render doesn't sound quantized
+
+A chart's own chords/melody are, by construction, locked exactly to
+the beat grid -- correct for notation, but playing that back perfectly
+literally is what makes a naive render sound like a sequencer instead
+of a person: identical velocity every time, identical timing every
+time, one unchanging block chord held dead-still for a whole bar. Two
+independent fixes address this, both in `pianobot/charts/`:
+
+- **`arrange.py`'s `comping` style** (`theory.comp_triads`) breaks a
+  held chord into a repeating rhythmic pattern instead of one static
+  sustain -- there's an actual rhythm for the ear to track, not just
+  "a chord happens."
+- **`humanize.py`** (on by default for both styles) nudges every
+  note's timing (±15ms) and velocity (±8) by a small, deterministic
+  random amount, so consecutive notes/chords are never bit-for-bit
+  identical -- the same reason no two real performances of the same
+  piece line up exactly, even played by the same person twice.
 
 ### Chart format
 

@@ -144,17 +144,16 @@ def parse_note_name(name: str) -> int:
     return 12 * (octave + 1) + pitch_class
 
 
-def voice_triads(chords: list[ChordEvent], base_octave: int = 3, velocity: int = 75) -> list[NoteEvent]:
-    """Turn each chord into a close-position triad, choosing each
-    triad's *inversion* to keep consecutive chords close together in
-    pitch (basic voice leading) instead of always playing root position.
+def _voiced_chords(chords: list[ChordEvent], base_octave: int):
+    """Yield (chord, chosen_pitches) for every playable chord, choosing
+    each triad's *inversion* to keep consecutive chords close together
+    in pitch (basic voice leading) instead of always playing root
+    position. "N" (no-chord) entries are skipped entirely.
 
-    See the original chords.py docstring (git history) for the full
-    explanation of close position / inversions / voice leading -- this
-    is the same logic, just moved here so both the chart-based and
-    audio-transcription paths can call it.
+    This is the voicing logic shared by both `voice_triads` (one
+    sustained block per chord) and `comp_triads` (the same voicings,
+    played in a rhythmic pattern instead) -- see their docstrings.
     """
-    notes: list[NoteEvent] = []
     root_base = 12 * (base_octave + 1)  # MIDI note 0 = C-1
     prev_centroid: float | None = None
 
@@ -179,8 +178,79 @@ def voice_triads(chords: list[ChordEvent], base_octave: int = 3, velocity: int =
             chosen = min(candidates, key=lambda pitches: abs(_centroid(pitches) - prev_centroid))
 
         prev_centroid = _centroid(chosen)
+        yield chord, chosen
+
+
+def voice_triads(chords: list[ChordEvent], base_octave: int = 3, velocity: int = 75) -> list[NoteEvent]:
+    """Turn each chord into a close-position triad, choosing each
+    triad's *inversion* to keep consecutive chords close together in
+    pitch (basic voice leading) instead of always playing root position.
+
+    Every chord becomes one sustained block: all 3 notes start when the
+    chord starts and end when it ends. This reads clearly but sounds
+    static/mechanical over anything longer than a beat or two -- see
+    `comp_triads` below for the same voicings played as a rhythm
+    instead of one flat sustain.
+
+    See the original chords.py docstring (git history) for the full
+    explanation of close position / inversions / voice leading -- this
+    is the same logic, just moved here so both the chart-based and
+    audio-transcription paths can call it.
+    """
+    notes: list[NoteEvent] = []
+    for chord, chosen in _voiced_chords(chords, base_octave):
         for pitch in chosen:
             notes.append(NoteEvent(pitch=pitch, start=chord.start, end=chord.end, velocity=velocity))
+    return notes
+
+
+# A "Charleston" comping cell (classic jazz/pop left-hand rhythm): hit
+# on the downbeat, hit again on the "and" of beat 2, each held until
+# the next hit -- (onset, duration), both in beats, tiling every 2 beats.
+_COMPING_CELL = ((0.0, 1.5), (1.5, 0.5))
+_COMPING_CELL_BEATS = 2.0
+# Notes are cut a little short of their full slot (a hair of silence
+# before the next hit) so consecutive hits read as distinct attacks
+# instead of blurring into one legato smear.
+_COMPING_DETACH = 0.9
+
+
+def _comping_onsets(duration_beats: float) -> list[tuple[float, float]]:
+    """Break a chord's duration into repeating comping-cell hits
+    (onset, duration in beats from the chord's own start). Tiles the
+    2-beat cell across the full duration; whatever's left over (less
+    than one full cell) becomes one plain sustained hit -- there's no
+    real feel benefit to subdividing a fragment shorter than a beat.
+    """
+    onsets: list[tuple[float, float]] = []
+    beat = 0.0
+    while duration_beats - beat >= _COMPING_CELL_BEATS:
+        for cell_onset, cell_duration in _COMPING_CELL:
+            onsets.append((beat + cell_onset, cell_duration))
+        beat += _COMPING_CELL_BEATS
+    remaining = duration_beats - beat
+    if remaining > 0:
+        onsets.append((beat, remaining))
+    return onsets
+
+
+def comp_triads(chords: list[ChordEvent], base_octave: int = 3, velocity: int = 72) -> list[NoteEvent]:
+    """Like `voice_triads`, but instead of one flat sustained block per
+    chord, plays the same voicing in a repeating rhythmic comping
+    pattern (the "Charleston" cell: hit on beat 1, hit on the "and" of
+    beat 2) -- this is the main fix for arrangements that sound
+    over-quantized/mechanical: a single unchanging block chord held for
+    a whole bar has no rhythmic feel at all, however correct the notes
+    themselves are.
+    """
+    notes: list[NoteEvent] = []
+    for chord, chosen in _voiced_chords(chords, base_octave):
+        duration_beats = chord.end - chord.start
+        for onset_beats, span_beats in _comping_onsets(duration_beats):
+            hit_start = chord.start + onset_beats
+            hit_end = hit_start + span_beats * _COMPING_DETACH
+            for pitch in chosen:
+                notes.append(NoteEvent(pitch=pitch, start=hit_start, end=hit_end, velocity=velocity))
     return notes
 
 

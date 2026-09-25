@@ -4,6 +4,7 @@ import { useSongLibrary } from './hooks/useSongLibrary.js';
 import MainSongs from './screens/MainSongs.jsx';
 import MidiTest from './screens/MidiTest.jsx';
 import RecordSongFlow from './screens/RecordSongFlow.jsx';
+import SongView from './screens/SongView.jsx';
 import './screens/shared.css';
 
 const NAV_STYLE = { display: 'flex', gap: 16, padding: '12px 40px 0', fontSize: 13 };
@@ -42,6 +43,7 @@ function LibraryOnboarding({ status, onChooseFolder, onReconnect }) {
 
 export default function App() {
   const [screen, setScreen] = useState('songs');
+  const [selectedSong, setSelectedSong] = useState(null);
   const library = useSongLibrary();
 
   return (
@@ -60,7 +62,10 @@ export default function App() {
           <MainSongs
             songs={library.songs}
             onAddSong={() => setScreen('addSong')}
-            onOpenSong={(song) => console.log('open song (viewing an existing song is not built yet)', song)}
+            onOpenSong={(song) => {
+              setSelectedSong(song);
+              setScreen('songView');
+            }}
           />
         )}
 
@@ -70,6 +75,10 @@ export default function App() {
             saveSong={library.saveSong}
             onSaved={() => setScreen('songs')}
           />
+        )}
+
+        {screen === 'songView' && selectedSong && (
+          <SongView song={selectedSong} onBack={() => setScreen('songs')} />
         )}
 
         {screen === 'midi-test' && <MidiTest />}

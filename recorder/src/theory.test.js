@@ -4,8 +4,10 @@ import {
   detectChordQuality,
   detectChords,
   formatChordSymbol,
+  mergeConsecutiveChords,
   messagesToNotes,
   midiNoteName,
+  parseChordSymbol,
   quantizeNotes,
   roundToBarInterval,
   secondsToBeats,
@@ -31,6 +33,24 @@ describe('formatChordSymbol', () => {
     expect(formatChordSymbol(11, 'm7b5')).toBe('Bm7b5');
     expect(formatChordSymbol(0, 'dim7')).toBe('Cdim7');
     expect(formatChordSymbol(0, 'minMaj7')).toBe('Cm(maj7)');
+  });
+});
+
+describe('parseChordSymbol', () => {
+  it('is the exact inverse of formatChordSymbol for every recognized quality, at every root', () => {
+    const qualities = ['maj', 'min', 'dim', 'aug', 'dom7', 'maj7', 'min7', 'm7b5', 'dim7', 'minMaj7'];
+    for (let root = 0; root < 12; root++) {
+      for (const quality of qualities) {
+        const symbol = formatChordSymbol(root, quality);
+        expect(parseChordSymbol(symbol)).toEqual({ rootPitchClass: root, quality });
+      }
+    }
+  });
+
+  it('returns null for a symbol that is not one of this app\'s own recognized shapes', () => {
+    expect(parseChordSymbol('Csus4')).toBeNull();
+    expect(parseChordSymbol('H')).toBeNull(); // not a real note letter
+    expect(parseChordSymbol('')).toBeNull();
   });
 });
 
@@ -193,6 +213,41 @@ describe('detectChords', () => {
       { pitch: 50, start: 2.0, end: 3.0 },
     ];
     expect(() => detectChords(notes, 0.05)).toThrow(/beat 2\.00/);
+  });
+});
+
+describe('mergeConsecutiveChords', () => {
+  it('merges adjacent identical chords into one, extended entry', () => {
+    const chords = [
+      { rootPitchClass: 0, quality: 'maj', start: 0, end: 4 }, // C
+      { rootPitchClass: 0, quality: 'maj', start: 4, end: 8 }, // C again -- re-struck, not a real change
+      { rootPitchClass: 5, quality: 'maj', start: 8, end: 12 }, // F
+    ];
+    expect(mergeConsecutiveChords(chords)).toEqual([
+      { rootPitchClass: 0, quality: 'maj', start: 0, end: 8 },
+      { rootPitchClass: 5, quality: 'maj', start: 8, end: 12 },
+    ]);
+  });
+
+  it('does not merge the same chord symbol if something else played in between', () => {
+    const chords = [
+      { rootPitchClass: 0, quality: 'maj', start: 0, end: 4 }, // C
+      { rootPitchClass: 5, quality: 'maj', start: 4, end: 8 }, // F
+      { rootPitchClass: 0, quality: 'maj', start: 8, end: 12 }, // C again, but a real repeat this time
+    ];
+    expect(mergeConsecutiveChords(chords)).toEqual(chords);
+  });
+
+  it('treats the same root with a different quality as a real change', () => {
+    const chords = [
+      { rootPitchClass: 0, quality: 'maj', start: 0, end: 4 }, // C
+      { rootPitchClass: 0, quality: 'min', start: 4, end: 8 }, // Cm
+    ];
+    expect(mergeConsecutiveChords(chords)).toEqual(chords);
+  });
+
+  it('leaves an already chord-change-only progression untouched', () => {
+    expect(mergeConsecutiveChords([])).toEqual([]);
   });
 });
 

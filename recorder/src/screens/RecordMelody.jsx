@@ -67,7 +67,7 @@ export default function RecordMelody({ title, sectionLabel, tempo, chordsResult,
         <span className="panel-label">Chords (playing back)</span>
         <div className="chord-bar-row">
           {chordsResult.chords.map((chord, i) => (
-            <div key={i} className="chord-bar" style={{ fontSize: 14, padding: '10px 6px' }}>
+            <div key={i} className="chord-bar" style={{ fontSize: 14, padding: '10px 6px', flexGrow: chord.end - chord.start }}>
               {formatChordSymbol(chord.rootPitchClass, chord.quality)}
             </div>
           ))}

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { playNoteAt } from './pianoSynth.js';
 import { RecordingSession } from './recordingSession.js';
 
 // Only the audio side is mocked (real Web Audio doesn't exist in this
@@ -126,6 +127,30 @@ describe('RecordingSession (melody mode)', () => {
     expect(doneResult).not.toBeNull();
     expect(doneResult.notes).toHaveLength(1);
     expect(doneResult.notes[0].pitch).toBe(60);
+  });
+
+  it('schedules chord backing for a fractional-beat chord, delayed by one full pickup bar', async () => {
+    // Regression test: chord backing used to piggyback on the click
+    // loop, which only ever visits *integer* beat positions -- a
+    // chord starting on a fractional beat (e.g. 2.25, completely
+    // normal at 16th-note quantization) silently never played. Now
+    // it's scheduled directly at its own precise beat position, one
+    // full pickup bar after the count-in ends.
+    playNoteAt.mockClear();
+    const chords = [{ rootPitchClass: 0, quality: 'maj', start: 2.25, end: 3 }];
+    const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'melody' });
+    session.start({ chords, sectionLengthBeats: 20 });
+
+    await wait(80); // past the count-in -- chord backing gets scheduled all at once right here
+    expect(playNoteAt).toHaveBeenCalled();
+
+    const secondsPerBeat = 60 / FAST_TEMPO;
+    const COUNT_IN_BEATS = 4;
+    const PICKUP_BEATS = 4;
+    const expectedWhen = 0.05 + (COUNT_IN_BEATS + PICKUP_BEATS + 2.25) * secondsPerBeat;
+    for (const [, , when] of playNoteAt.mock.calls) {
+      expect(when).toBeCloseTo(expectedWhen, 10);
+    }
   });
 
   it('restart() discards the in-progress take and begins a fresh count-in', async () => {

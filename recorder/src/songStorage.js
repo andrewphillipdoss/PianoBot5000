@@ -60,6 +60,26 @@ export function buildChartData({ title, key, tempo, sectionLabel, sectionLengthB
   };
 }
 
+/**
+ * Same idea as theory.js's `mergeConsecutiveChords`, for the on-disk
+ * `{beat, duration_beats, chord}` shape (`chord` a plain lead-sheet
+ * symbol string, not root/quality) -- applied when *viewing* a song,
+ * so a chart saved before chords were merged at record time still
+ * displays merged rather than repeating the same symbol.
+ */
+export function mergeConsecutiveChordEntries(chords) {
+  const merged = [];
+  for (const entry of chords) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.chord === entry.chord) {
+      prev.duration_beats = entry.beat + entry.duration_beats - prev.beat;
+    } else {
+      merged.push({ ...entry });
+    }
+  }
+  return merged;
+}
+
 export function formatRelativeTime(timestampMs, nowMs = Date.now()) {
   const diffSeconds = Math.max(0, Math.round((nowMs - timestampMs) / 1000));
   const diffMinutes = Math.round(diffSeconds / 60);

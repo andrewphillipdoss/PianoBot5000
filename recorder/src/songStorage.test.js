@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChartData, chartFileName, formatRelativeTime, slugify, summarizeChart } from './songStorage.js';
+import { buildChartData, chartFileName, formatRelativeTime, mergeConsecutiveChordEntries, slugify, summarizeChart } from './songStorage.js';
 
 describe('slugify', () => {
   it('lowercases and dashes spaces/punctuation', () => {
@@ -20,6 +20,29 @@ describe('slugify', () => {
 describe('chartFileName', () => {
   it('appends .json to the slugified title', () => {
     expect(chartFileName('Amazing Grace')).toBe('amazing-grace.json');
+  });
+});
+
+describe('mergeConsecutiveChordEntries', () => {
+  it('merges adjacent identical chord symbols and extends the duration', () => {
+    const chords = [
+      { beat: 0, duration_beats: 4, chord: 'C' },
+      { beat: 4, duration_beats: 4, chord: 'C' },
+      { beat: 8, duration_beats: 4, chord: 'F' },
+    ];
+    expect(mergeConsecutiveChordEntries(chords)).toEqual([
+      { beat: 0, duration_beats: 8, chord: 'C' },
+      { beat: 8, duration_beats: 4, chord: 'F' },
+    ]);
+  });
+
+  it('does not merge the same symbol coming back after something else played', () => {
+    const chords = [
+      { beat: 0, duration_beats: 4, chord: 'C' },
+      { beat: 4, duration_beats: 4, chord: 'F' },
+      { beat: 8, duration_beats: 4, chord: 'C' },
+    ];
+    expect(mergeConsecutiveChordEntries(chords)).toEqual(chords);
   });
 });
 

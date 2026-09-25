@@ -6,9 +6,19 @@
  * calls into this once a pass is done; it never runs mid-recording.
  */
 
-import { detectChords, messagesToNotes, quantizeNotes, roundToBarInterval, secondsToBeats, trimTrailingEmptyBars } from './theory.js';
+import { detectChords, mergeConsecutiveChords, messagesToNotes, quantizeNotes, roundToBarInterval, secondsToBeats, trimTrailingEmptyBars } from './theory.js';
 
 export const BEATS_PER_BAR = 4;
+
+// One bar of lead-in captured before the chords start playing back
+// during a melody pass, so pickup/anacrusis notes have somewhere to
+// go. Capturing already starts right when the count-in ends (see
+// recordingSession.js's _beginCapturing) -- this is what that gap is
+// *for*, rather than the chords entering immediately. Notes played in
+// it come back with a *negative* beat position (see processMelodyPass
+// below), same as how a pickup measure is normally counted relative
+// to the downbeat it leads into.
+export const PICKUP_BEATS = BEATS_PER_BAR;
 
 // Notes are quantized onto a 16th-note grid (quantizeNotes' own default,
 // 4 subdivisions/beat = 0.25 beats/step) before chord clustering ever
@@ -45,7 +55,7 @@ export function processChordsPass(rawMessages, tempo, captureDurationSeconds) {
   // when stop() was pressed (the normal case) closes there instead of
   // being dropped for never getting an explicit note-off.
   const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), QUANTIZE_SUBDIVISIONS_PER_BEAT);
-  const chords = detectChords(notes, CHORD_CLUSTER_THRESHOLD_BEATS);
+  const chords = mergeConsecutiveChords(detectChords(notes, CHORD_CLUSTER_THRESHOLD_BEATS));
 
   const rawTotalBeats = captureDurationSeconds * (tempo / 60);
   const trimmedBeats = trimTrailingEmptyBars(rawTotalBeats, chords.map((c) => c.start), BEATS_PER_BAR);
@@ -55,18 +65,21 @@ export function processChordsPass(rawMessages, tempo, captureDurationSeconds) {
 }
 
 /**
- * A completed melody pass -> { notes }. Its length is already fixed
- * by the chords pass (it's recorded playing back for exactly
- * `sectionLengthBeats`, see recordingSession.js), so there's no
- * length calculation here -- just quantize, then clip anything that
- * spilled past the known section boundary (a note started right at
- * the edge and got cut off by playback stopping).
+ * A completed melody pass -> { notes }. Capturing runs for one pickup
+ * bar (PICKUP_BEATS) plus `sectionLengthBeats` (already fixed by the
+ * chords pass, see recordingSession.js) -- notes get rebased so beat 0
+ * lines up with the actual downbeat (where the chords start), meaning
+ * a pickup note comes back with a *negative* start, not clipped or
+ * dropped. Anything at or past the section's own end is clipped the
+ * same way a note spilling into the boundary always was.
  */
 export function processMelodyPass(rawMessages, tempo, sectionLengthBeats) {
+  const totalCaptureBeats = PICKUP_BEATS + sectionLengthBeats;
   // Same reasoning as processChordsPass: a melody note still held
   // when playback auto-stops should close there, not vanish.
-  const captureDurationSeconds = sectionLengthBeats * (60 / tempo);
+  const captureDurationSeconds = totalCaptureBeats * (60 / tempo);
   const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), QUANTIZE_SUBDIVISIONS_PER_BEAT)
+    .map((n) => ({ ...n, start: n.start - PICKUP_BEATS, end: n.end - PICKUP_BEATS }))
     .filter((n) => n.start < sectionLengthBeats)
     .map((n) => ({ ...n, end: Math.min(n.end, sectionLengthBeats) }))
     // Clipping to the boundary above can turn a note that quantized

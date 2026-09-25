@@ -45,7 +45,9 @@ export default function ChordsReview({ title, sectionLabel, keySignature, chords
         <span className="panel-label">Chord chart</span>
         <div className="chord-bar-row">
           {chordsResult.chords.map((chord, i) => (
-            <div key={i} className="chord-bar">{formatChordSymbol(chord.rootPitchClass, chord.quality)}</div>
+            <div key={i} className="chord-bar" style={{ flexGrow: chord.end - chord.start }}>
+              {formatChordSymbol(chord.rootPitchClass, chord.quality)}
+            </div>
           ))}
         </div>
       </div>

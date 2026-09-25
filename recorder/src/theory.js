@@ -52,6 +52,26 @@ export function formatChordSymbol(rootPitchClass, quality) {
   return `${NOTE_NAMES[rootPitchClass]}${QUALITY_SUFFIX[quality] ?? quality}`;
 }
 
+const QUALITY_FROM_SUFFIX = Object.fromEntries(Object.entries(QUALITY_SUFFIX).map(([quality, suffix]) => [suffix, quality]));
+
+/**
+ * The reverse of `formatChordSymbol` -- a saved chart's chords are
+ * stored as plain symbol strings (e.g. "Dm7"), not root/quality, so
+ * anything that needs to *voice* an already-saved chord (song
+ * playback) has to parse it back first. Returns null for anything
+ * that doesn't parse as one of this app's own recognized symbols
+ * (e.g. a hand-edited chart file), rather than throwing -- playback
+ * skips a chord it can't make sense of instead of crashing outright.
+ */
+export function parseChordSymbol(symbol) {
+  const rootLength = symbol[1] === '#' ? 2 : 1;
+  const rootPitchClass = NOTE_NAMES.indexOf(symbol.slice(0, rootLength));
+  if (rootPitchClass === -1) return null;
+  const quality = QUALITY_FROM_SUFFIX[symbol.slice(rootLength)];
+  if (!quality) return null;
+  return { rootPitchClass, quality };
+}
+
 function matchesAgainst(pcSet, intervalTable) {
   const matches = [];
   for (const root of [...pcSet].sort((a, b) => a - b)) {
@@ -165,6 +185,29 @@ export function detectChords(notes, thresholdBeats = 0.15) {
       end: Math.max(...cluster.map((n) => n.end)),
     };
   });
+}
+
+/**
+ * Merge neighboring ChordEvents that are actually the same chord (same
+ * root + quality) into one longer entry. A chord re-struck for
+ * rhythmic emphasis, or a sustain that happened to get detected as two
+ * separate onsets, isn't a real chord *change* -- it shouldn't be
+ * counted as one or drawn as a repeat of the same symbol; the merged
+ * entry just extends to cover the combined duration. Only ever merges
+ * immediate neighbors in the sequence -- the same chord coming back
+ * later, with something else in between, is a real repeat, not this.
+ */
+export function mergeConsecutiveChords(chords) {
+  const merged = [];
+  for (const chord of chords) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.rootPitchClass === chord.rootPitchClass && prev.quality === chord.quality) {
+      prev.end = chord.end;
+    } else {
+      merged.push({ ...chord });
+    }
+  }
+  return merged;
 }
 
 /**

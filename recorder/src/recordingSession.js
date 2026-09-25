@@ -21,7 +21,7 @@
  * comment on `_beginCapturing` for why.
  */
 
-import { processChordsPass, processMelodyPass } from './recordingPipeline.js';
+import { PICKUP_BEATS, processChordsPass, processMelodyPass } from './recordingPipeline.js';
 import { getAudioContext, playClickAt, playNoteAt, stopAllNotes, stopNoteAt } from './pianoSynth.js';
 import { voiceChordSimple } from './theory.js';
 
@@ -104,26 +104,35 @@ export class RecordingSession {
       const beatWithinCapture = beatIndex - COUNT_IN_BEATS;
 
       // Chords mode has no known end -- keep clicking until stop() cancels this loop.
-      // Melody mode's length is fixed, so stop scheduling once it's covered.
-      if (!isCountInBeat && this.mode === 'melody' && beatWithinCapture >= this.sectionLengthBeats) break;
+      // Melody mode's length (pickup bar + section) is fixed, so stop once it's covered.
+      if (!isCountInBeat && this.mode === 'melody' && beatWithinCapture >= PICKUP_BEATS + this.sectionLengthBeats) break;
 
       const when = this._audioTimeForBeat(beatIndex);
       const strong = isCountInBeat ? beatIndex === 0 : beatWithinCapture % BEATS_PER_BAR === 0;
       playClickAt(when, strong);
 
-      if (!isCountInBeat && this.mode === 'melody') {
-        this._scheduleChordsStartingAtBeat(beatWithinCapture, when);
-      }
-
       this.nextScheduledBeat += 1;
     }
   }
 
-  _scheduleChordsStartingAtBeat(beatWithinCapture, when) {
+  /**
+   * Schedule every chord's backing audio in one precise pass, up
+   * front, rather than piggybacking on the click loop above. That
+   * loop only ever visits *integer* beat positions (one click per
+   * beat) -- a chord starting on a fractional beat (e.g. 2.25, common
+   * at 16th-note quantization) would simply never match and silently
+   * never play. Web Audio nodes can be scheduled arbitrarily far
+   * ahead via `.start(when)`/`.stop(when)` (this is the API's own
+   * documented pattern, not a workaround), so there's no need for
+   * incremental lookahead here the way the open-ended click loop
+   * needs it -- the whole chord progression and its timing are
+   * already fully known the moment capturing begins.
+   */
+  _scheduleChordBacking() {
     for (const chord of this.chordsToPlay) {
-      if (chord.start !== beatWithinCapture) continue;
-      const pitches = voiceChordSimple(chord.rootPitchClass, chord.quality);
+      const when = this._audioTimeForBeat(COUNT_IN_BEATS + PICKUP_BEATS + chord.start);
       const durationSeconds = (chord.end - chord.start) * this.secondsPerBeat;
+      const pitches = voiceChordSimple(chord.rootPitchClass, chord.quality);
       for (const pitch of pitches) {
         playNoteAt(pitch, 70, when);
         stopNoteAt(pitch, when + durationSeconds * 0.95); // a hair of detach so consecutive chords read as distinct hits
@@ -142,8 +151,16 @@ export class RecordingSession {
     this.captureStartRealTime = performance.now();
     this._setPhase('capturing');
 
+    // Capturing starts right here, a full pickup bar (PICKUP_BEATS)
+    // before the chords actually enter -- see recordingPipeline.js's
+    // PICKUP_BEATS for why (pickup/anacrusis notes need somewhere to
+    // be played into).
     if (this.mode === 'melody') {
-      this._captureEndTimeoutId = setTimeout(() => this._finishCapture(), this.sectionLengthBeats * this.secondsPerBeat * 1000);
+      this._scheduleChordBacking();
+      this._captureEndTimeoutId = setTimeout(
+        () => this._finishCapture(),
+        (PICKUP_BEATS + this.sectionLengthBeats) * this.secondsPerBeat * 1000
+      );
     }
   }
 

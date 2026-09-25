@@ -122,6 +122,16 @@
   color: var(--ink);
 }
 
+/* Placeholder text (example values like "Amazing Grace") needs to read as
+   clearly not-yet-entered -- it sits close enough to --ink at a glance to
+   be mistaken for a real value otherwise, which left "Start Recording
+   Chords" looking broken when it was really just waiting on a title. */
+.field input::placeholder {
+  color: var(--ink-soft);
+  font-style: italic;
+  opacity: 0.75;
+}
+
 .field input:focus,
 .field select:focus {
   outline: 2px solid var(--accent);

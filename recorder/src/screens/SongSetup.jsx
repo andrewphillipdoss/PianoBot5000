@@ -37,7 +37,12 @@ export default function SongSetup({ onBack, onSubmit }) {
         </label>
       </div>
 
-      <div className="actions-row" style={{ justifyContent: 'flex-end' }}>
+      <div className="actions-row" style={{ justifyContent: 'flex-end', gap: 12 }}>
+        {!canSubmit && (
+          <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
+            {title.trim().length === 0 ? 'Enter a title to continue' : 'Enter a key and a tempo above 0 to continue'}
+          </span>
+        )}
         <button
           className="btn-primary"
           disabled={!canSubmit}

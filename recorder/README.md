@@ -25,20 +25,28 @@ change since:
 4. **Chords review** -- the detected chord chart, section length
    auto-computed (trailing dead air trimmed, rounded to the nearest 4
    bars), adjustable by a 4-bar step before proceeding.
-5. **Record Melody** -- the chords play back (audibly, synthesized) for
-   exactly the section's length while you play the melody over them; no
-   manual stop, it auto-finishes when the chords do. Space mid-take
-   scraps it and restarts the count-in.
-6. **Section Complete** -- Chord Chart view (bars + chord symbols) of
-   what was captured, Re-record Chords/Melody, Finalize (writes the
-   chart JSON to your songs folder).
+5. **Record Melody** -- capturing starts with one pickup bar before the
+   chords enter, so a pickup/anacrusis note has somewhere to go (it comes
+   back with a negative beat position); the chords then play back
+   (audibly, synthesized) for exactly the section's length while you play
+   the melody over them -- no manual stop, it auto-finishes when the
+   chords do. Space mid-take scraps it and restarts the count-in.
+6. **Section Complete** -- Chord Chart view (bars + chord symbols,
+   consecutive repeats of the same chord merged into one wider entry
+   rather than listed twice) of what was captured, Re-record
+   Chords/Melody, Finalize (writes the chart JSON to your songs folder).
+7. **Song view** -- click a song in My Songs to see its chord chart and a
+   simple piano-roll of its melody (time left-to-right, pitch low-to-high;
+   not real notation, see below), plus a Play button that plays the whole
+   section back (chords + melody together).
 
 **Deliberately out of scope for now** (see the design discussion in this
 repo's history for why): real lead-sheet notation rendering (the
 "toggle to see actual engraved music" view from the design wireframe --
-this pass only has the Chord Chart view), and multi-section songs (the
-"Song with N Sections" view, "+ Add Section"). Both are big enough to
-deserve their own pass once this core loop was proven working.
+this pass has the Chord Chart view plus a plain piano-roll for melody,
+not engraved notation), and multi-section songs (the "Song with N
+Sections" view, "+ Add Section"). Both are big enough to deserve their
+own pass once this core loop was proven working.
 
 A small dev-only diagnostic screen, **MIDI Test**, is still in the top
 nav -- useful for debugging Web MIDI/chord-detection issues in isolation

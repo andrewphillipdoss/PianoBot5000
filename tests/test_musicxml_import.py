@@ -9,11 +9,15 @@ Skipped entirely if music21 isn't installed (it's an optional extra,
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 music21 = pytest.importorskip("music21")
 
 from pianobot.charts.musicxml_format import chart_from_score, load_chart
+
+_OPENEWLD_DATASET = Path(__file__).parent.parent / "examples" / "openewld" / "dataset"
 
 
 def _score_with_part(part) -> "music21.stream.Score":
@@ -174,3 +178,29 @@ def test_rehearsal_marks_become_labeled_sections():
 
     assert [s.label for s in chart.sections] == ["A", "B", "A"]
     assert [s.source_label for s in chart.sections] == ["Verse", "Chorus", "Verse"]
+
+
+@pytest.mark.skipif(not _OPENEWLD_DATASET.exists(), reason="examples/openewld/dataset not present")
+def test_bundled_openewld_dataset_is_complete():
+    # Guards against the bundled dataset silently losing files (a bad
+    # merge, an accidental partial commit, ...) -- all 502 were verified
+    # to parse without error when they were added; this just confirms
+    # the count didn't drift.
+    files = list(_OPENEWLD_DATASET.glob("*/*/*.mxl"))
+    assert len(files) == 502
+
+
+@pytest.mark.skipif(not _OPENEWLD_DATASET.exists(), reason="examples/openewld/dataset not present")
+@pytest.mark.parametrize("relative_path", [
+    "DuBose_Heyward-George_Gershwin-Ira_Gershwin/Summertime/Summertime.mxl",
+    "Andy_Razaf-Fats_Waller-Harry_Brooks/Ain't_Misbehavin'/Ain't_Misbehavin'.mxl",
+    "[Traditional]/Swing_Low,_Sweet_Chariot/Swing_Low,_Sweet_Chariot.mxl",
+])
+def test_a_sample_of_bundled_real_files_parse_cleanly(relative_path):
+    # A fast spot-check against a few real, bundled files -- not all
+    # 502 (that's a slower one-off manual check, not something worth
+    # paying for on every test run), just enough to catch a regression
+    # in the importer itself against real-world MusicXML.
+    chart = load_chart(_OPENEWLD_DATASET / relative_path)
+    assert len(chart.melody) > 0
+    assert len(chart.chords) > 0

@@ -113,13 +113,14 @@ redistribution license (e.g. community iReal Pro playlists) is
 something to parse for personal practice use rather than to bundle
 into this repo directly.
 
-For real standards to try immediately, see `examples/openewld/` --
-five public-domain jazz-age lead sheets (Summertime, Ain't Misbehavin',
-Sweet Georgia Brown, Tea for Two, Swing Low Sweet Chariot) pulled from
+For real standards to try immediately, see `examples/openewld/` -- all
+502 public-domain lead sheets from
 [OpenEWLD](https://github.com/00sapo/OpenEWLD), a public-domain-filtered
-subset of the old Wikifonia leadsheet corpus -- safe to keep committed
-here, unlike community-sourced chart collections whose songs are still
-under copyright.
+subset of the old Wikifonia leadsheet corpus (jazz-age pop standards,
+spirituals/gospel, hymns, and folk songs) -- safe to keep committed
+here in full, unlike community-sourced chart collections whose songs
+are still under copyright. See `examples/openewld/README.md` for what's
+in it and how it's organized.
 
 ### Importing from MusicXML (sheet music)
 

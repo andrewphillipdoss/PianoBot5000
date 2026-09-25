@@ -172,6 +172,16 @@ leading, section labeling, MIDI assembly, and the MusicXML importer
 sheet-music file needed -- these skip themselves if `music21` isn't
 installed, since it's its own extra).
 
+## 3D piano visualizer (experimental)
+
+`visualizer/` procedurally builds an 88-key 3D piano in Blender and
+animates its keys pressing down in sync with any MIDI file this
+project produces, using Blender's official headless Python package
+(`bpy` -- no Blender application install or GUI needed). Every key is
+generated geometry (not a downloaded 3D model), hinged so a rotation
+presses it down convincingly. See `visualizer/README.md` for setup and
+usage; verified on Linux, not yet tried on macOS/Windows.
+
 ---
 
 ## Transcribe mode (optional, legacy)

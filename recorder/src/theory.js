@@ -117,20 +117,25 @@ export function detectChordQuality(pitchClasses, bassPitchClass = null) {
   return matches[0];
 }
 
+/** Snap one beat value onto the nearest grid point, `subdivisionsPerBeat` steps per beat (4 = 16th-note resolution). */
+export function quantizeBeat(beat, subdivisionsPerBeat = 4) {
+  const step = 1 / subdivisionsPerBeat;
+  return Math.round(beat / step) * step;
+}
+
 /**
  * Snap every note's start/end (already in beats) onto the nearest
- * grid point, `subdivisionsPerBeat` steps per beat (4 = 16th-note
- * resolution, matching pianobot5000's own default elsewhere). This is
- * deliberately light -- just enough to remove hand-timing jitter, not
- * enough to erase real rhythmic intent. A note that would collapse to
- * zero length after snapping is nudged to one grid step instead of
- * being dropped, since every captured note was a real keystroke.
+ * grid point (see `quantizeBeat`). This is deliberately light -- just
+ * enough to remove hand-timing jitter, not enough to erase real
+ * rhythmic intent. A note that would collapse to zero length after
+ * snapping is nudged to one grid step instead of being dropped, since
+ * every captured note was a real keystroke.
  */
 export function quantizeNotes(notes, subdivisionsPerBeat = 4) {
   const step = 1 / subdivisionsPerBeat;
   return notes.map((note) => {
-    let start = Math.round(note.start / step) * step;
-    let end = Math.round(note.end / step) * step;
+    let start = quantizeBeat(note.start, subdivisionsPerBeat);
+    let end = quantizeBeat(note.end, subdivisionsPerBeat);
     if (end <= start) end = start + step;
     return { ...note, start, end };
   });

@@ -7,6 +7,7 @@ import {
   formatRelativeTime,
   mergeConsecutiveChordEntries,
   nextSectionLabel,
+  readChartQuantization,
   replaceLastSectionData,
   sectionChordsAsInternal,
   slugify,
@@ -77,7 +78,8 @@ describe('buildChartData', () => {
       title: 'Amazing Grace',
       key: 'C',
       tempo: 76,
-      quantization: 4, // not passed above -- defaults to 16th notes
+      chordsQuantization: 2, // not passed above -- defaults to 8th notes
+      melodyQuantization: 4, // not passed above -- defaults to 16th notes
       sections: [{ label: 'A', start_beat: 0, end_beat: 16 }],
       chords: [
         { beat: 0, duration_beats: 4, chord: 'C' },
@@ -87,18 +89,34 @@ describe('buildChartData', () => {
     });
   });
 
-  it('saves an explicitly chosen quantization instead of defaulting', () => {
+  it('saves explicitly chosen quantization settings instead of defaulting', () => {
     const chart = buildChartData({
       title: 'Amazing Grace',
       key: 'C',
       tempo: 76,
-      quantization: 8, // 32nd notes
+      chordsQuantization: 4, // 16th notes
+      melodyQuantization: 8, // 32nd notes
       sectionLabel: 'A',
       sectionLengthBeats: 16,
       chords: [],
       melody: [],
     });
-    expect(chart.quantization).toBe(8);
+    expect(chart.chordsQuantization).toBe(4);
+    expect(chart.melodyQuantization).toBe(8);
+  });
+});
+
+describe('readChartQuantization', () => {
+  it('reads separate chords/melody quantization fields', () => {
+    expect(readChartQuantization({ chordsQuantization: 2, melodyQuantization: 8 })).toEqual({
+      chordsQuantization: 2,
+      melodyQuantization: 8,
+    });
+  });
+
+  it('falls back to a single legacy quantization field for both, then to the current defaults', () => {
+    expect(readChartQuantization({ quantization: 8 })).toEqual({ chordsQuantization: 8, melodyQuantization: 8 });
+    expect(readChartQuantization({})).toEqual({ chordsQuantization: 2, melodyQuantization: 4 });
   });
 });
 

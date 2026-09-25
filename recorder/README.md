@@ -18,26 +18,32 @@ change since:
 1. **My Songs** -- lists every chart JSON file in a folder you pick once
    (remembered across reloads via IndexedDB; re-grant permission with one
    click if the browser ever forgets).
-2. **Add a Song** -- title/key/tempo/quantization (8th/16th/32nd notes),
-   once per song.
+2. **Add a Song** -- title/key/tempo, once per song. Quantization (8th/
+   16th/32nd notes) lives on the record screens themselves instead (see
+   below) -- chords default to 8th notes, melody to 16th, and both are
+   changeable there in every mode, re-record included.
 3. **Record Chords** -- Space (or click) starts a count-in, then records;
    Space again stops. Live feedback: held notes + the detected chord
    (triads and 7th chords -- dom7/maj7/min7/m7b5/dim7/minMaj7).
 4. **Chords review** -- the detected chord chart, section length
    auto-computed (trailing dead air trimmed, rounded to the nearest 4
-   bars), adjustable by a 4-bar step before proceeding.
+   bars), adjustable by a 4-bar step before proceeding. Changing the
+   quantization here re-derives this exact take from its still-available
+   raw MIDI at the new grid -- no re-recording needed.
 5. **Record Melody** -- capturing starts with one pickup bar before the
-   chords enter, so a pickup/anacrusis note has somewhere to go (it comes
-   back with a negative beat position); the chords then play back
-   (audibly, synthesized) for exactly the section's length while you play
-   the melody over them -- no manual stop, it auto-finishes when the
-   chords do. Space mid-take scraps it and restarts the count-in.
+   chords enter (the status pill says so explicitly), so a pickup/
+   anacrusis note has somewhere to go (it comes back with a negative beat
+   position); the chords then play back (audibly, synthesized) for
+   exactly the section's length while you play the melody over them --
+   no manual stop, it auto-finishes when the chords do. Space mid-take
+   scraps it and restarts the count-in.
 6. **Section Complete** -- Chord Chart view (bars + chord symbols,
    consecutive repeats of the same chord merged into one wider entry
    rather than listed twice) of what was captured, Re-record
    Chords/Melody, **+ Add Another Section** (records the next section
    right away, saving all of them together on Finalize), or Finalize
-   (writes the chart JSON to your songs folder).
+   (writes the chart JSON to your songs folder). Changing melody
+   quantization here re-derives it from raw MIDI at the new grid too.
 7. **Song view** -- click a song in My Songs to see every section's chord
    chart and a simple piano-roll of its melody (time left-to-right, pitch
    low-to-high; not real notation, see below), a Play button that plays
@@ -57,6 +63,16 @@ straddles the section boundary) belong to which section once one in the
 middle is touched -- deferred rather than risk silently misattributing or
 dropping notes, since the common case (re-record what you just did) is
 always the last section anyway.
+
+**Chord clustering ("were these notes struck together?") is independent
+of the quantization grid** -- it runs on raw, unquantized timing with its
+own fixed hand-roll tolerance; the chosen display grid only rounds a
+chord's boundaries *after* clustering has already decided which notes
+belong to it. This matters at coarse grids especially: quantizing first
+(this pipeline's old behavior) meant the threshold needed to bridge one
+grid step of rounding error was, at 8th notes, *wider than a routine
+eighth-note chord change* -- two genuinely different chords a normal half-
+beat apart would get merged into one unrecognizable cluster.
 
 **Deliberately out of scope for now** (see the design discussion in this
 repo's history for why): real lead-sheet notation rendering (the

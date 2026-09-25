@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useMidi } from '../hooks/MidiProvider.jsx';
 import { useRecordingSession } from '../hooks/useRecordingSession.js';
+import QuantizationSelect from './QuantizationSelect.jsx';
 import { formatChordSymbol } from '../theory.js';
 import './shared.css';
 
@@ -11,9 +12,14 @@ import './shared.css';
  * the chords do. Space mid-take scraps it and restarts the count-in
  * (there's no "I'm finished early" signal to give here, since the
  * length is already fixed).
+ *
+ * Capturing starts with a full pickup bar before the chords enter (see
+ * recordingPipeline.js's PICKUP_BEATS) -- `isPickupBar` distinguishes
+ * that lead-in window from the chords actually playing, so the status
+ * text can say so instead of just "recording" throughout.
  */
-export default function RecordMelody({ title, sectionLabel, tempo, subdivisionsPerBeat, chordsResult, onBack, onDone }) {
-  const { phase, result, error, start, restart, handleMidiMessage } = useRecordingSession({ tempo, mode: 'melody', subdivisionsPerBeat });
+export default function RecordMelody({ title, sectionLabel, tempo, subdivisionsPerBeat, onSubdivisionsPerBeatChange, chordsResult, onBack, onDone }) {
+  const { phase, result, error, isPickupBar, start, restart, handleMidiMessage } = useRecordingSession({ tempo, mode: 'melody', subdivisionsPerBeat });
   const midi = useMidi();
 
   useEffect(() => midi.subscribe(handleMidiMessage), [midi, handleMidiMessage]);
@@ -77,6 +83,7 @@ export default function RecordMelody({ title, sectionLabel, tempo, subdivisionsP
       <div className="record-console">
         {phase === 'idle' && (
           <>
+            <QuantizationSelect label="Melody quantization" value={subdivisionsPerBeat} onChange={onSubdivisionsPerBeatChange} />
             <button
               className="record-button"
               onClick={() => start({ chords: chordsResult.chords, sectionLengthBeats: chordsResult.sectionLengthBeats })}
@@ -85,7 +92,7 @@ export default function RecordMelody({ title, sectionLabel, tempo, subdivisionsP
               <span className="record-button__glyph" />
             </button>
             <span style={{ color: 'var(--ink-soft)', fontSize: 14, textAlign: 'center' }}>
-              Press Space (or click) -- count-in, then the chords play back while you play the melody along with them
+              Press Space (or click) -- count-in, then a pickup bar for any lead-in notes, then the chords play back while you play the melody along with them
             </span>
           </>
         )}
@@ -97,7 +104,16 @@ export default function RecordMelody({ title, sectionLabel, tempo, subdivisionsP
             <div className="record-button-wrap">
               <div className="record-button-ring" />
             </div>
-            <div className="status-pill">Recording &mdash; Section {sectionLabel}, Melody</div>
+            {isPickupBar ? (
+              <>
+                <div className="status-pill">Pickup bar &mdash; Section {sectionLabel}</div>
+                <span style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--ink-soft)', textAlign: 'center' }}>
+                  Play any lead-in notes now &mdash; the chords start right after this bar
+                </span>
+              </>
+            ) : (
+              <div className="status-pill">Recording &mdash; Section {sectionLabel}, Melody</div>
+            )}
             <span style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--ink-soft)', textAlign: 'center' }}>
               Auto-stops when the chords finish &mdash; press Space to scrap this take and start over
             </span>

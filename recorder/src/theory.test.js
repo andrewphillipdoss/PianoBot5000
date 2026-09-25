@@ -8,6 +8,7 @@ import {
   messagesToNotes,
   midiNoteName,
   parseChordSymbol,
+  quantizeBeat,
   quantizeNotes,
   roundToBarInterval,
   secondsToBeats,
@@ -137,6 +138,14 @@ describe('voiceChordSimple', () => {
 
   it('returns an empty voicing for an unrecognized quality', () => {
     expect(voiceChordSimple(0, 'nonsense')).toEqual([]);
+  });
+});
+
+describe('quantizeBeat', () => {
+  it('snaps onto the nearest grid point for a given subdivision', () => {
+    expect(quantizeBeat(4.3, 2)).toBe(4.5); // 8th notes
+    expect(quantizeBeat(4.3, 4)).toBe(4.25); // 16th notes
+    expect(quantizeBeat(4.3, 8)).toBe(4.25); // 32nd notes (4.3 is nearer 4.25 than 4.375)
   });
 });
 

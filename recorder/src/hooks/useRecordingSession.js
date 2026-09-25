@@ -19,6 +19,7 @@ export function useRecordingSession({ tempo, mode, subdivisionsPerBeat }) {
   const [phase, setPhase] = useState('idle');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [isPickupBar, setIsPickupBar] = useState(false);
   const sessionRef = useRef(null);
 
   // Lazy ref-singleton init -- React's own documented pattern for
@@ -27,7 +28,15 @@ export function useRecordingSession({ tempo, mode, subdivisionsPerBeat }) {
   // Some lint rules flag any ref access during render on principle;
   // this specific shape is the sanctioned exception.
   if (!sessionRef.current) {
-    sessionRef.current = new RecordingSession({ tempo, mode, subdivisionsPerBeat, onPhaseChange: setPhase, onDone: setResult, onError: setError });
+    sessionRef.current = new RecordingSession({
+      tempo,
+      mode,
+      subdivisionsPerBeat,
+      onPhaseChange: setPhase,
+      onPickupBarChange: setIsPickupBar,
+      onDone: setResult,
+      onError: setError,
+    });
   }
 
   useEffect(() => () => sessionRef.current?.cancel(), []);
@@ -49,5 +58,5 @@ export function useRecordingSession({ tempo, mode, subdivisionsPerBeat }) {
 
   const handleMidiMessage = useCallback((message) => sessionRef.current?.handleMidiMessage(message), []);
 
-  return { phase, result, error, start, stop, restart, handleMidiMessage };
+  return { phase, result, error, isPickupBar, start, stop, restart, handleMidiMessage };
 }

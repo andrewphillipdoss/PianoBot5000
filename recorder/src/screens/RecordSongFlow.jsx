@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { appendSectionData, emptyChartData, nextSectionLabel, replaceLastSectionData, sectionChordsAsInternal } from '../songStorage.js';
+import { appendSectionData, emptyChartData, nextSectionLabel, readChartQuantization, replaceLastSectionData, sectionChordsAsInternal } from '../songStorage.js';
 import ChordsReview from './ChordsReview.jsx';
 import RecordChords from './RecordChords.jsx';
 import RecordMelody from './RecordMelody.jsx';
@@ -33,15 +33,21 @@ import SongSetup from './SongSetup.jsx';
  * Only the *last* section can be re-recorded (see songStorage.js's
  * replaceLastSectionData for why); "addSection"/multi-section-in-one-
  * sitting have no such restriction since they only ever add on.
+ *
+ * Chords/melody quantization are tracked here (not per-song-setup --
+ * see SongSetup.jsx) so they can be changed on the record screens
+ * themselves and in every mode, re-record included; a chart read back
+ * for addSection/re-record keeps using whatever grid it was last
+ * recorded at (readChartQuantization tolerates an older chart's single
+ * shared `quantization` field too).
  */
 export default function RecordSongFlow({ mode = 'newSong', baseChartData = null, onCancel, onSaved, saveSong }) {
   const isReplacing = mode === 'reRecordChords' || mode === 'reRecordMelody';
   const lastSection = baseChartData?.sections.at(-1) ?? null;
 
-  const [song, setSong] = useState(() =>
-    baseChartData
-      ? { title: baseChartData.title, key: baseChartData.key, tempo: baseChartData.tempo, subdivisionsPerBeat: baseChartData.quantization }
-      : null
+  const [song, setSong] = useState(() => (baseChartData ? { title: baseChartData.title, key: baseChartData.key, tempo: baseChartData.tempo } : null));
+  const [{ chordsQuantization, melodyQuantization }, setQuantization] = useState(() =>
+    baseChartData ? readChartQuantization(baseChartData) : readChartQuantization({})
   );
   const [screen, setScreen] = useState(mode === 'newSong' ? 'setup' : mode === 'reRecordMelody' ? 'recordMelody' : 'recordChords');
   const [chordsResult, setChordsResult] = useState(() =>
@@ -58,19 +64,20 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
 
   const sectionLabel = isReplacing ? lastSection.label : nextSectionLabel((baseChartData?.sections.length ?? 0) + completedSections.length);
 
-  async function finalize(finalChordsResult, finalMelodyResult) {
+  async function finalize(finalMelodyNotes) {
     const thisSection = {
       sectionLabel,
-      sectionLengthBeats: finalChordsResult.sectionLengthBeats,
-      chords: finalChordsResult.chords,
-      melody: finalMelodyResult.notes,
+      sectionLengthBeats: chordsResult.sectionLengthBeats,
+      chords: chordsResult.chords,
+      melody: finalMelodyNotes,
     };
-    const chartData = isReplacing
+    let chartData = isReplacing
       ? replaceLastSectionData(baseChartData, thisSection)
       : [...completedSections, thisSection].reduce(
           (acc, section) => appendSectionData(acc, section),
-          baseChartData ?? emptyChartData({ title: song.title, key: song.key, tempo: song.tempo, quantization: song.subdivisionsPerBeat })
+          baseChartData ?? emptyChartData({ title: song.title, key: song.key, tempo: song.tempo })
         );
+    chartData = { ...chartData, chordsQuantization, melodyQuantization }; // whatever grid was actually used for this session, even if it differs from what the chart started with
     const savedSummary = await saveSong(chartData);
     onSaved(savedSummary);
   }
@@ -93,7 +100,8 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
         title={song.title}
         sectionLabel={sectionLabel}
         tempo={song.tempo}
-        subdivisionsPerBeat={song.subdivisionsPerBeat}
+        subdivisionsPerBeat={chordsQuantization}
+        onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, chordsQuantization: value }))}
         onBack={mode === 'newSong' && completedSections.length === 0 ? () => setScreen('setup') : onCancel}
         onDone={(result) => {
           setChordsResult(result);
@@ -108,14 +116,17 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
       <ChordsReview
         title={song.title}
         sectionLabel={sectionLabel}
+        tempo={song.tempo}
         keySignature={song.key}
         chordsResult={chordsResult}
+        subdivisionsPerBeat={chordsQuantization}
+        onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, chordsQuantization: value }))}
         onReRecord={() => {
           setChordsResult(null);
           setScreen('recordChords');
         }}
-        onProceed={(sectionLengthBeats) => {
-          setChordsResult((prev) => ({ ...prev, sectionLengthBeats }));
+        onProceed={({ chords, sectionLengthBeats }) => {
+          setChordsResult({ ...chordsResult, chords, sectionLengthBeats });
           setScreen('recordMelody');
         }}
       />
@@ -128,7 +139,8 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
         title={song.title}
         sectionLabel={sectionLabel}
         tempo={song.tempo}
-        subdivisionsPerBeat={song.subdivisionsPerBeat}
+        subdivisionsPerBeat={melodyQuantization}
+        onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, melodyQuantization: value }))}
         chordsResult={chordsResult}
         onBack={mode === 'reRecordMelody' ? onCancel : () => setScreen('chordsReview')}
         onDone={(result) => {
@@ -144,9 +156,12 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
     <SectionComplete
       title={song.title}
       sectionLabel={sectionLabel}
+      tempo={song.tempo}
       keySignature={song.key}
       chordsResult={chordsResult}
       melodyResult={melodyResult}
+      subdivisionsPerBeat={melodyQuantization}
+      onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, melodyQuantization: value }))}
       finalizeLabel={mode === 'newSong' || mode === 'addSection' ? 'Finalize Song' : 'Save Changes'}
       onReRecordChords={
         mode === 'reRecordMelody'
@@ -164,14 +179,14 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
       onAddSection={
         isReplacing
           ? undefined // re-record modes replace exactly one section and save -- add a section as its own, separate action afterward
-          : () => {
-              setCompletedSections((prev) => [...prev, { sectionLabel, sectionLengthBeats: chordsResult.sectionLengthBeats, chords: chordsResult.chords, melody: melodyResult.notes }]);
+          : (notes) => {
+              setCompletedSections((prev) => [...prev, { sectionLabel, sectionLengthBeats: chordsResult.sectionLengthBeats, chords: chordsResult.chords, melody: notes }]);
               setChordsResult(null);
               setMelodyResult(null);
               setScreen('recordChords');
             }
       }
-      onFinalize={() => finalize(chordsResult, melodyResult)}
+      onFinalize={(notes) => finalize(notes)}
     />
   );
 }

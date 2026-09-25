@@ -102,6 +102,34 @@ describe('processChordsPass', () => {
     const { chords } = processChordsPass(messages, TEMPO, 8 * SPB, 2); // 2 subdivisions/beat = 8th notes
     expect(chords[0].start).toBe(4.5); // snaps to the nearest half-beat, not the nearest 16th
   });
+
+  it('does not merge two distinct chords a normal eighth-note apart, even at 8th-note quantization', () => {
+    // Regression test: clustering used to run *after* quantization,
+    // with a threshold that grew alongside the grid step (to bridge
+    // one step of rounding error) -- at 8th-note quantization that
+    // threshold (0.6 beats) was wider than the routine half-beat
+    // spacing between two different chords, so they'd wrongly merge
+    // into one unrecognizable cluster instead of two real ones.
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 48, velocity: 90 }, // C major, beat 0
+      { timestamp: 0, type: 'noteon', note: 52, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 55, velocity: 90 },
+      { timestamp: 0.5 * SPB, type: 'noteoff', note: 48, velocity: 0 },
+      { timestamp: 0.5 * SPB, type: 'noteoff', note: 52, velocity: 0 },
+      { timestamp: 0.5 * SPB, type: 'noteoff', note: 55, velocity: 0 },
+      { timestamp: 0.5 * SPB, type: 'noteon', note: 53, velocity: 90 }, // F major, beat 0.5 -- a normal eighth-note chord change
+      { timestamp: 0.5 * SPB, type: 'noteon', note: 57, velocity: 90 },
+      { timestamp: 0.5 * SPB, type: 'noteon', note: 60, velocity: 90 },
+      { timestamp: 1 * SPB, type: 'noteoff', note: 53, velocity: 0 },
+      { timestamp: 1 * SPB, type: 'noteoff', note: 57, velocity: 0 },
+      { timestamp: 1 * SPB, type: 'noteoff', note: 60, velocity: 0 },
+    ];
+    const { chords } = processChordsPass(messages, TEMPO, 4 * SPB, 2); // 2 subdivisions/beat = 8th notes
+    expect(chords).toEqual([
+      { rootPitchClass: 0, quality: 'maj', start: 0, end: 0.5 },
+      { rootPitchClass: 5, quality: 'maj', start: 0.5, end: 1 },
+    ]);
+  });
 });
 
 describe('processMelodyPass', () => {

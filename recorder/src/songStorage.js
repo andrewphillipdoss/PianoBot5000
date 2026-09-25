@@ -12,7 +12,7 @@
  * faked directory handle, not unit tested).
  */
 
-import { DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT } from './recordingPipeline.js';
+import { DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT, DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT } from './recordingPipeline.js';
 import { formatChordSymbol, parseChordSymbol } from './theory.js';
 
 // ---------------------------------------------------------------------------
@@ -37,15 +37,35 @@ export function chartFileName(title) {
  * song is built up from by appending sections onto it one at a time
  * (see `appendSectionData`).
  *
- * `quantization` (subdivisions/beat -- see recordingPipeline.js) isn't
- * part of the legacy CLI's own chart format, but the legacy reader
- * ignores unknown top-level keys, so it round-trips harmlessly here:
- * re-recording an already-saved song reads it back out and keeps using
- * the same grid it was originally recorded at, rather than silently
- * resetting to the default.
+ * `chordsQuantization`/`melodyQuantization` (subdivisions/beat -- see
+ * recordingPipeline.js) aren't part of the legacy CLI's own chart
+ * format, but the legacy reader ignores unknown top-level keys, so
+ * they round-trip harmlessly here: re-recording an already-saved song
+ * reads them back out and keeps using the same grid it was originally
+ * recorded at, rather than silently resetting to the default.
  */
-export function emptyChartData({ title, key, tempo, quantization = DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT }) {
-  return { title, key, tempo, quantization, sections: [], chords: [], melody: [] };
+export function emptyChartData({
+  title,
+  key,
+  tempo,
+  chordsQuantization = DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
+  melodyQuantization = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
+}) {
+  return { title, key, tempo, chordsQuantization, melodyQuantization, sections: [], chords: [], melody: [] };
+}
+
+/**
+ * Read a chart's quantization settings back out, tolerating a chart
+ * saved before chords/melody had separate settings (a single
+ * `quantization` field, applied to both) -- falls back through that,
+ * then to the current defaults, so an old file never throws or
+ * silently loses its own recorded grid.
+ */
+export function readChartQuantization(chartData) {
+  return {
+    chordsQuantization: chartData.chordsQuantization ?? chartData.quantization ?? DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
+    melodyQuantization: chartData.melodyQuantization ?? chartData.quantization ?? DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
+  };
 }
 
 /** 0 -> "A", 1 -> "B", ... -- this app's whole section-labeling scheme, single letters in order recorded. */
@@ -94,8 +114,8 @@ export function appendSectionData(chartData, { sectionLabel, sectionLengthBeats,
 }
 
 /** Build the chart JSON object for a brand new, single-section song -- `emptyChartData` + `appendSectionData` in one call. */
-export function buildChartData({ title, key, tempo, quantization, sectionLabel, sectionLengthBeats, chords, melody }) {
-  return appendSectionData(emptyChartData({ title, key, tempo, quantization }), { sectionLabel, sectionLengthBeats, chords, melody });
+export function buildChartData({ title, key, tempo, chordsQuantization, melodyQuantization, sectionLabel, sectionLengthBeats, chords, melody }) {
+  return appendSectionData(emptyChartData({ title, key, tempo, chordsQuantization, melodyQuantization }), { sectionLabel, sectionLengthBeats, chords, melody });
 }
 
 /**

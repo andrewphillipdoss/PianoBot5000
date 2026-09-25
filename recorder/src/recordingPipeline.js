@@ -6,7 +6,7 @@
  * calls into this once a pass is done; it never runs mid-recording.
  */
 
-import { detectChords, mergeConsecutiveChords, messagesToNotes, quantizeNotes, roundToBarInterval, secondsToBeats, trimTrailingEmptyBars } from './theory.js';
+import { detectChords, mergeConsecutiveChords, messagesToNotes, quantizeBeat, quantizeNotes, roundToBarInterval, secondsToBeats, trimTrailingEmptyBars } from './theory.js';
 
 export const BEATS_PER_BAR = 4;
 
@@ -20,31 +20,33 @@ export const BEATS_PER_BAR = 4;
 // to the downbeat it leads into.
 export const PICKUP_BEATS = BEATS_PER_BAR;
 
-// How finely notes are snapped to the beat grid before chord
-// clustering sees them -- chosen per-song at setup (8th/16th/32nd; see
-// SongSetup.jsx), 16th notes (4 subdivisions/beat) if a caller doesn't
-// say. Passed through explicitly rather than each pipeline function
-// defaulting it separately, so a chart's saved `quantization` field
-// (songStorage.js's buildChartData) round-trips through re-recording
-// without silently drifting.
-export const DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT = 4;
+// How finely notes are snapped to the beat grid for display -- chosen
+// per-song at setup (8th/16th/32nd; see SongSetup.jsx), these defaults
+// if a caller doesn't say. Chords and melody default *differently*:
+// chord changes are rarely faster than an 8th note and a coarser grid
+// reads cleaner on the chord chart, while a melody line wants the
+// finer 16th-note grid to keep its actual rhythm recognizable. Passed
+// through explicitly rather than each pipeline function defaulting it
+// separately, so a chart's saved `chordsQuantization`/
+// `melodyQuantization` fields (songStorage.js's buildChartData)
+// round-trip through re-recording without silently drifting.
+export const DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT = 2;
+export const DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT = 4;
 
-// A cluster threshold smaller than the quantize grid step is a real
-// bug, not just tight: two notes struck genuinely together can still
-// round to *adjacent* grid points (rounding can push them up to half a
-// step apart each, so up to a full step apart from each other), and a
-// threshold that can't bridge one grid step will then see them as two
-// separate, unrecognizable partial chords instead of one real one. The
-// margin below is a fixed amount of real hand-roll slack *on top of*
-// whatever the grid step is -- a hand roll's natural timing spread
-// doesn't get tighter just because quantization was set finer, so this
-// is additive, not a multiple of the (variable) grid step. At the
-// default 16th-note grid this reproduces the original 0.25 + 0.1 = 0.35.
-const CHORD_CLUSTER_THRESHOLD_MARGIN_BEATS = 0.1;
-
-function chordClusterThresholdBeats(subdivisionsPerBeat) {
-  return 1 / subdivisionsPerBeat + CHORD_CLUSTER_THRESHOLD_MARGIN_BEATS;
-}
+// Whether two notes were "struck together" as one chord is a real-time
+// question -- a natural hand roll's spread doesn't change just because
+// the chosen *display* quantization grid is coarser or finer -- so
+// clustering runs on raw, unquantized timing with this fixed threshold,
+// entirely independent of subdivisionsPerBeat. Quantizing *before*
+// clustering (this pipeline's old behavior) was a real bug: at a coarse
+// grid (8th notes, 0.5 beats/step) a threshold wide enough to bridge
+// one grid step of rounding error is *wider than a normal chord-change
+// spacing*, so two genuinely different chords a routine eighth-note
+// apart would get merged into one unrecognizable cluster. Clustering
+// first and quantizing the result afterward (below) sidesteps that
+// tension completely: this threshold only ever has to reason about a
+// real hand roll, never about the display grid.
+const CHORD_CLUSTER_THRESHOLD_BEATS = 0.35;
 
 /**
  * A completed chords pass -> { chords, sectionLengthBeats }. The
@@ -62,12 +64,23 @@ function chordClusterThresholdBeats(subdivisionsPerBeat) {
  * end time" would silently throw away exactly the trailing-silence
  * information trimming needs.
  */
-export function processChordsPass(rawMessages, tempo, captureDurationSeconds, subdivisionsPerBeat = DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT) {
+export function processChordsPass(rawMessages, tempo, captureDurationSeconds, subdivisionsPerBeat = DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT) {
   // endTimestamp = the capture boundary itself, so a chord still held
   // when stop() was pressed (the normal case) closes there instead of
   // being dropped for never getting an explicit note-off.
-  const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), subdivisionsPerBeat);
-  const chords = mergeConsecutiveChords(detectChords(notes, chordClusterThresholdBeats(subdivisionsPerBeat)));
+  const rawNotes = secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo);
+  const rawChords = mergeConsecutiveChords(detectChords(rawNotes, CHORD_CLUSTER_THRESHOLD_BEATS));
+  // Only *now*, after clustering has already decided which notes are
+  // one chord, does the display grid come in -- purely rounding each
+  // chord's boundaries to it, same as any note (including the same
+  // "never round away to nothing" guard quantizeNotes uses).
+  const step = 1 / subdivisionsPerBeat;
+  const chords = rawChords.map((c) => {
+    const start = quantizeBeat(c.start, subdivisionsPerBeat);
+    let end = quantizeBeat(c.end, subdivisionsPerBeat);
+    if (end <= start) end = start + step;
+    return { ...c, start, end };
+  });
 
   const rawTotalBeats = captureDurationSeconds * (tempo / 60);
   const trimmedBeats = trimTrailingEmptyBars(rawTotalBeats, chords.map((c) => c.start), BEATS_PER_BAR);
@@ -85,7 +98,7 @@ export function processChordsPass(rawMessages, tempo, captureDurationSeconds, su
  * dropped. Anything at or past the section's own end is clipped the
  * same way a note spilling into the boundary always was.
  */
-export function processMelodyPass(rawMessages, tempo, sectionLengthBeats, subdivisionsPerBeat = DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT) {
+export function processMelodyPass(rawMessages, tempo, sectionLengthBeats, subdivisionsPerBeat = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT) {
   const totalCaptureBeats = PICKUP_BEATS + sectionLengthBeats;
   // Same reasoning as processChordsPass: a melody note still held
   // when playback auto-stops should close there, not vanish.

@@ -50,6 +50,11 @@ describe('RecordingSession (chords mode)', () => {
     expect(phases).toEqual(['idle', 'countIn', 'capturing', 'done']); // start() always cancels first, hence the leading 'idle'
     expect(session.result.chords).toHaveLength(1);
     expect(session.result.chords[0].quality).toBe('maj');
+
+    // rawMessages + captureDurationSeconds ride along so a later
+    // screen can re-quantize this exact take without re-recording.
+    expect(session.result.rawMessages).toHaveLength(3);
+    expect(session.result.captureDurationSeconds).toBeGreaterThan(0);
   });
 
   it('cancel() stops everything and goes back to idle', async () => {
@@ -126,6 +131,29 @@ describe('RecordingSession (melody mode)', () => {
     expect(doneResult).not.toBeNull();
     expect(doneResult.notes).toHaveLength(1);
     expect(doneResult.notes[0].pitch).toBe(60);
+    expect(doneResult.rawMessages).toHaveLength(2); // note-on + note-off, so this take can be re-quantized later too
+  });
+
+  it('signals the pickup bar starting when capturing begins and ending one bar later', async () => {
+    const pickupBarChanges = [];
+    const session = new RecordingSession({
+      tempo: FAST_TEMPO,
+      mode: 'melody',
+      onPickupBarChange: (isPickupBar) => pickupBarChanges.push(isPickupBar),
+    });
+    session.start({ chords: [], sectionLengthBeats: 20 });
+
+    await wait(20); // still in count-in -- pickup bar hasn't started yet
+    expect(session.isPickupBar).toBe(false);
+
+    await wait(30); // past the ~40ms count-in -- capturing (and the pickup bar) has begun
+    expect(session.phase).toBe('capturing');
+    expect(session.isPickupBar).toBe(true);
+
+    await wait(50); // past the ~40ms pickup bar -- the chords have started, pickup bar is over
+    expect(session.isPickupBar).toBe(false);
+    // Leading falses: the constructor's own _resetPassState(), plus start()'s cancel() and its own _resetPassState().
+    expect(pickupBarChanges).toEqual([false, false, false, true, false]);
   });
 
   it('schedules chord backing for a fractional-beat chord, delayed by one full pickup bar', async () => {

@@ -1,4 +1,7 @@
+import { useState } from 'react';
+import { processMelodyPass } from '../recordingPipeline.js';
 import { formatChordSymbol } from '../theory.js';
+import QuantizationSelect from './QuantizationSelect.jsx';
 import './shared.css';
 
 /**
@@ -10,20 +13,35 @@ import './shared.css';
  * them, so the button for it doesn't render at all rather than sitting
  * there doing nothing (see RecordSongFlow.jsx for which modes omit
  * which).
+ *
+ * The quantization picker re-derives melody from its still-available
+ * raw MIDI (melodyResult.rawMessages) at the new grid, against the
+ * section's already-fixed length -- no re-recording needed, same idea
+ * as ChordsReview.jsx.
  */
 export default function SectionComplete({
   title,
   sectionLabel,
+  tempo,
   keySignature,
   chordsResult,
   melodyResult,
+  subdivisionsPerBeat,
+  onSubdivisionsPerBeatChange,
   finalizeLabel = 'Finalize Song',
   onReRecordChords,
   onReRecordMelody,
   onAddSection,
   onFinalize,
 }) {
+  const [notes, setNotes] = useState(melodyResult.notes);
   const bars = chordsResult.sectionLengthBeats / 4;
+
+  function handleQuantizationChange(newSubdivisionsPerBeat) {
+    onSubdivisionsPerBeatChange(newSubdivisionsPerBeat);
+    const reprocessed = processMelodyPass(melodyResult.rawMessages, tempo, chordsResult.sectionLengthBeats, newSubdivisionsPerBeat);
+    setNotes(reprocessed.notes);
+  }
 
   return (
     <div className="screen">
@@ -42,6 +60,7 @@ export default function SectionComplete({
           <span className="label">Status</span>
           <span className="value" style={{ color: 'var(--good)' }}>Chords + Melody &#10003;</span>
         </div>
+        <QuantizationSelect label="Melody quantization" value={subdivisionsPerBeat} onChange={handleQuantizationChange} />
       </div>
 
       <div className="panel">
@@ -57,16 +76,16 @@ export default function SectionComplete({
 
       <div className="panel">
         <span className="panel-label">Melody</span>
-        <span style={{ fontSize: 15 }}>{melodyResult.notes.length} notes captured</span>
+        <span style={{ fontSize: 15 }}>{notes.length} notes captured</span>
       </div>
 
       <div className="actions-row">
         <div style={{ display: 'flex', gap: 10 }}>
           {onReRecordChords && <button className="btn-ghost" onClick={onReRecordChords}>Re-record Chords</button>}
           <button className="btn-ghost" onClick={onReRecordMelody}>Re-record Melody</button>
-          {onAddSection && <button className="btn-ghost" onClick={onAddSection}>+ Add Another Section</button>}
+          {onAddSection && <button className="btn-ghost" onClick={() => onAddSection(notes)}>+ Add Another Section</button>}
         </div>
-        <button className="btn-primary" onClick={onFinalize}>{finalizeLabel}</button>
+        <button className="btn-primary" onClick={() => onFinalize(notes)}>{finalizeLabel}</button>
       </div>
     </div>
   );

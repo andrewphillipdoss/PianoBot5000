@@ -21,7 +21,13 @@
  * comment on `_beginCapturing` for why.
  */
 
-import { DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT, PICKUP_BEATS, processChordsPass, processMelodyPass } from './recordingPipeline.js';
+import {
+  DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
+  DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
+  PICKUP_BEATS,
+  processChordsPass,
+  processMelodyPass,
+} from './recordingPipeline.js';
 import { getAudioContext, playClickAt, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
 import { voiceChordSimple } from './theory.js';
 
@@ -36,8 +42,17 @@ export class RecordingSession {
    * @param {number} options.tempo - BPM
    * @param {'chords'|'melody'} options.mode
    * @param {number} [options.subdivisionsPerBeat] - quantization grid,
-   *   chosen per-song at setup (2/4/8 = 8th/16th/32nd notes)
+   *   chosen per-song at setup (2/4/8 = 8th/16th/32nd notes); defaults
+   *   depend on `mode` (chords: 8th, melody: 16th -- see
+   *   recordingPipeline.js) since a caller not specifying one is only
+   *   ever a test, never real UI (SongSetup.jsx always passes one).
    * @param {(phase: string) => void} [options.onPhaseChange]
+   * @param {(isPickupBar: boolean) => void} [options.onPickupBarChange] -
+   *   melody mode only: fires true right as capturing begins (a full
+   *   pickup bar before the chords actually enter -- see
+   *   recordingPipeline.js's PICKUP_BEATS), then false once that bar
+   *   has elapsed and the chords have started. Lets the UI say
+   *   "this is the pickup bar" instead of just "recording."
    * @param {(result: object) => void} [options.onDone]
    * @param {(error: Error) => void} [options.onError] - fires instead of
    *   onDone when the just-captured take can't be turned into a result
@@ -45,12 +60,14 @@ export class RecordingSession {
    *   held notes -- see theory.js). Phase drops back to 'idle' so the
    *   player can just hit record again.
    */
-  constructor({ tempo, mode, subdivisionsPerBeat = DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT, onPhaseChange, onDone, onError }) {
+  constructor({ tempo, mode, subdivisionsPerBeat, onPhaseChange, onPickupBarChange, onDone, onError }) {
+    subdivisionsPerBeat ??= mode === 'melody' ? DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT : DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT;
     this.tempo = tempo;
     this.mode = mode;
     this.subdivisionsPerBeat = subdivisionsPerBeat;
     this.secondsPerBeat = 60 / tempo;
     this.onPhaseChange = onPhaseChange ?? (() => {});
+    this.onPickupBarChange = onPickupBarChange ?? (() => {});
     this.onDone = onDone ?? (() => {});
     this.onError = onError ?? (() => {});
     this.phase = 'idle'; // idle | countIn | capturing | done
@@ -64,6 +81,13 @@ export class RecordingSession {
     this._scheduleIntervalId = null;
     this._captureStartTimeoutId = null;
     this._captureEndTimeoutId = null;
+    this._pickupEndTimeoutId = null;
+    this._setPickupBar(false);
+  }
+
+  _setPickupBar(isPickupBar) {
+    this.isPickupBar = isPickupBar;
+    this.onPickupBarChange(isPickupBar);
   }
 
   _setPhase(phase) {
@@ -159,6 +183,8 @@ export class RecordingSession {
     // PICKUP_BEATS for why (pickup/anacrusis notes need somewhere to
     // be played into).
     if (this.mode === 'melody') {
+      this._setPickupBar(true);
+      this._pickupEndTimeoutId = setTimeout(() => this._setPickupBar(false), PICKUP_BEATS * this.secondsPerBeat * 1000);
       this._scheduleChordBacking();
       this._captureEndTimeoutId = setTimeout(
         () => this._finishCapture(),
@@ -184,14 +210,24 @@ export class RecordingSession {
   _finishCapture(chordsCaptureDurationSeconds = null) {
     clearInterval(this._scheduleIntervalId);
     clearTimeout(this._captureEndTimeoutId);
+    clearTimeout(this._pickupEndTimeoutId);
+    this._setPickupBar(false);
     stopAllNotes();
 
     let result;
     try {
+      // rawMessages (plus, for chords, the real capture duration) ride
+      // along on the result so a later screen can re-derive it with a
+      // *different* quantization without re-recording -- see
+      // ChordsReview.jsx/SectionComplete.jsx.
       result =
         this.mode === 'chords'
-          ? processChordsPass(this.bufferedMessages, this.tempo, chordsCaptureDurationSeconds, this.subdivisionsPerBeat)
-          : processMelodyPass(this.bufferedMessages, this.tempo, this.sectionLengthBeats, this.subdivisionsPerBeat);
+          ? {
+              ...processChordsPass(this.bufferedMessages, this.tempo, chordsCaptureDurationSeconds, this.subdivisionsPerBeat),
+              rawMessages: this.bufferedMessages,
+              captureDurationSeconds: chordsCaptureDurationSeconds,
+            }
+          : { ...processMelodyPass(this.bufferedMessages, this.tempo, this.sectionLengthBeats, this.subdivisionsPerBeat), rawMessages: this.bufferedMessages };
     } catch (error) {
       // A bad take (e.g. an unrecognizable chord) isn't a bug -- drop
       // back to idle so the player can just record it again, rather
@@ -218,6 +254,8 @@ export class RecordingSession {
     clearInterval(this._scheduleIntervalId);
     clearTimeout(this._captureStartTimeoutId);
     clearTimeout(this._captureEndTimeoutId);
+    clearTimeout(this._pickupEndTimeoutId);
+    this._setPickupBar(false);
     stopAllNotes();
     this._setPhase('idle');
   }

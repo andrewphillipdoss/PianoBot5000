@@ -13,8 +13,8 @@ import './shared.css';
  * accurate and immediate, where a decorative beat visual that isn't
  * actually beat-synced would just be misleading.
  */
-export default function RecordChords({ title, sectionLabel, tempo, onBack, onDone }) {
-  const { phase, result, error, start, stop, handleMidiMessage } = useRecordingSession({ tempo, mode: 'chords' });
+export default function RecordChords({ title, sectionLabel, tempo, subdivisionsPerBeat, onBack, onDone }) {
+  const { phase, result, error, start, stop, handleMidiMessage } = useRecordingSession({ tempo, mode: 'chords', subdivisionsPerBeat });
   const midi = useMidi();
 
   // Feed the shared MIDI stream into this screen's recording session

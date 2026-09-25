@@ -21,8 +21,8 @@
  * comment on `_beginCapturing` for why.
  */
 
-import { PICKUP_BEATS, processChordsPass, processMelodyPass } from './recordingPipeline.js';
-import { getAudioContext, playClickAt, playNoteAt, stopAllNotes, stopNoteAt } from './pianoSynth.js';
+import { DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT, PICKUP_BEATS, processChordsPass, processMelodyPass } from './recordingPipeline.js';
+import { getAudioContext, playClickAt, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
 import { voiceChordSimple } from './theory.js';
 
 const COUNT_IN_BEATS = 4; // one bar
@@ -35,6 +35,8 @@ export class RecordingSession {
    * @param {object} options
    * @param {number} options.tempo - BPM
    * @param {'chords'|'melody'} options.mode
+   * @param {number} [options.subdivisionsPerBeat] - quantization grid,
+   *   chosen per-song at setup (2/4/8 = 8th/16th/32nd notes)
    * @param {(phase: string) => void} [options.onPhaseChange]
    * @param {(result: object) => void} [options.onDone]
    * @param {(error: Error) => void} [options.onError] - fires instead of
@@ -43,9 +45,10 @@ export class RecordingSession {
    *   held notes -- see theory.js). Phase drops back to 'idle' so the
    *   player can just hit record again.
    */
-  constructor({ tempo, mode, onPhaseChange, onDone, onError }) {
+  constructor({ tempo, mode, subdivisionsPerBeat = DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT, onPhaseChange, onDone, onError }) {
     this.tempo = tempo;
     this.mode = mode;
+    this.subdivisionsPerBeat = subdivisionsPerBeat;
     this.secondsPerBeat = 60 / tempo;
     this.onPhaseChange = onPhaseChange ?? (() => {});
     this.onDone = onDone ?? (() => {});
@@ -134,8 +137,8 @@ export class RecordingSession {
       const durationSeconds = (chord.end - chord.start) * this.secondsPerBeat;
       const pitches = voiceChordSimple(chord.rootPitchClass, chord.quality);
       for (const pitch of pitches) {
-        playNoteAt(pitch, 70, when);
-        stopNoteAt(pitch, when + durationSeconds * 0.95); // a hair of detach so consecutive chords read as distinct hits
+        // 0.95x: a hair of detach so consecutive chords read as distinct hits, not one smeared-together tone.
+        playNoteForDuration(pitch, 70, when, durationSeconds * 0.95);
       }
     }
   }
@@ -187,8 +190,8 @@ export class RecordingSession {
     try {
       result =
         this.mode === 'chords'
-          ? processChordsPass(this.bufferedMessages, this.tempo, chordsCaptureDurationSeconds)
-          : processMelodyPass(this.bufferedMessages, this.tempo, this.sectionLengthBeats);
+          ? processChordsPass(this.bufferedMessages, this.tempo, chordsCaptureDurationSeconds, this.subdivisionsPerBeat)
+          : processMelodyPass(this.bufferedMessages, this.tempo, this.sectionLengthBeats, this.subdivisionsPerBeat);
     } catch (error) {
       // A bad take (e.g. an unrecognizable chord) isn't a bug -- drop
       // back to idle so the player can just record it again, rather

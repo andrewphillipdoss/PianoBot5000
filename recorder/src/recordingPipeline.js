@@ -20,19 +20,31 @@ export const BEATS_PER_BAR = 4;
 // to the downbeat it leads into.
 export const PICKUP_BEATS = BEATS_PER_BAR;
 
-// Notes are quantized onto a 16th-note grid (quantizeNotes' own default,
-// 4 subdivisions/beat = 0.25 beats/step) before chord clustering ever
-// sees them. A cluster threshold smaller than that grid step is a real
+// How finely notes are snapped to the beat grid before chord
+// clustering sees them -- chosen per-song at setup (8th/16th/32nd; see
+// SongSetup.jsx), 16th notes (4 subdivisions/beat) if a caller doesn't
+// say. Passed through explicitly rather than each pipeline function
+// defaulting it separately, so a chart's saved `quantization` field
+// (songStorage.js's buildChartData) round-trips through re-recording
+// without silently drifting.
+export const DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT = 4;
+
+// A cluster threshold smaller than the quantize grid step is a real
 // bug, not just tight: two notes struck genuinely together can still
 // round to *adjacent* grid points (rounding can push them up to half a
 // step apart each, so up to a full step apart from each other), and a
 // threshold that can't bridge one grid step will then see them as two
-// separate, unrecognizable partial chords instead of one real one.
-// 0.35 clears that with real margin left over for an actual hand roll,
-// while still being tight enough not to smear together a genuinely fast
-// chord change.
-const QUANTIZE_SUBDIVISIONS_PER_BEAT = 4;
-const CHORD_CLUSTER_THRESHOLD_BEATS = 0.35;
+// separate, unrecognizable partial chords instead of one real one. The
+// margin below is a fixed amount of real hand-roll slack *on top of*
+// whatever the grid step is -- a hand roll's natural timing spread
+// doesn't get tighter just because quantization was set finer, so this
+// is additive, not a multiple of the (variable) grid step. At the
+// default 16th-note grid this reproduces the original 0.25 + 0.1 = 0.35.
+const CHORD_CLUSTER_THRESHOLD_MARGIN_BEATS = 0.1;
+
+function chordClusterThresholdBeats(subdivisionsPerBeat) {
+  return 1 / subdivisionsPerBeat + CHORD_CLUSTER_THRESHOLD_MARGIN_BEATS;
+}
 
 /**
  * A completed chords pass -> { chords, sectionLengthBeats }. The
@@ -50,12 +62,12 @@ const CHORD_CLUSTER_THRESHOLD_BEATS = 0.35;
  * end time" would silently throw away exactly the trailing-silence
  * information trimming needs.
  */
-export function processChordsPass(rawMessages, tempo, captureDurationSeconds) {
+export function processChordsPass(rawMessages, tempo, captureDurationSeconds, subdivisionsPerBeat = DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT) {
   // endTimestamp = the capture boundary itself, so a chord still held
   // when stop() was pressed (the normal case) closes there instead of
   // being dropped for never getting an explicit note-off.
-  const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), QUANTIZE_SUBDIVISIONS_PER_BEAT);
-  const chords = mergeConsecutiveChords(detectChords(notes, CHORD_CLUSTER_THRESHOLD_BEATS));
+  const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), subdivisionsPerBeat);
+  const chords = mergeConsecutiveChords(detectChords(notes, chordClusterThresholdBeats(subdivisionsPerBeat)));
 
   const rawTotalBeats = captureDurationSeconds * (tempo / 60);
   const trimmedBeats = trimTrailingEmptyBars(rawTotalBeats, chords.map((c) => c.start), BEATS_PER_BAR);
@@ -73,12 +85,12 @@ export function processChordsPass(rawMessages, tempo, captureDurationSeconds) {
  * dropped. Anything at or past the section's own end is clipped the
  * same way a note spilling into the boundary always was.
  */
-export function processMelodyPass(rawMessages, tempo, sectionLengthBeats) {
+export function processMelodyPass(rawMessages, tempo, sectionLengthBeats, subdivisionsPerBeat = DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT) {
   const totalCaptureBeats = PICKUP_BEATS + sectionLengthBeats;
   // Same reasoning as processChordsPass: a melody note still held
   // when playback auto-stops should close there, not vanish.
   const captureDurationSeconds = totalCaptureBeats * (60 / tempo);
-  const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), QUANTIZE_SUBDIVISIONS_PER_BEAT)
+  const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), subdivisionsPerBeat)
     .map((n) => ({ ...n, start: n.start - PICKUP_BEATS, end: n.end - PICKUP_BEATS }))
     .filter((n) => n.start < sectionLengthBeats)
     .map((n) => ({ ...n, end: Math.min(n.end, sectionLengthBeats) }))

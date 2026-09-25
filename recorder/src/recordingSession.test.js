@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { playNoteAt } from './pianoSynth.js';
+import { playNoteForDuration } from './pianoSynth.js';
 import { RecordingSession } from './recordingSession.js';
 
 // Only the audio side is mocked (real Web Audio doesn't exist in this
@@ -13,8 +13,7 @@ import { RecordingSession } from './recordingSession.js';
 vi.mock('./pianoSynth.js', () => ({
   getAudioContext: () => ({ currentTime: 0 }),
   playClickAt: vi.fn(),
-  playNoteAt: vi.fn(),
-  stopNoteAt: vi.fn(),
+  playNoteForDuration: vi.fn(),
   stopAllNotes: vi.fn(),
 }));
 
@@ -136,19 +135,19 @@ describe('RecordingSession (melody mode)', () => {
     // normal at 16th-note quantization) silently never played. Now
     // it's scheduled directly at its own precise beat position, one
     // full pickup bar after the count-in ends.
-    playNoteAt.mockClear();
+    playNoteForDuration.mockClear();
     const chords = [{ rootPitchClass: 0, quality: 'maj', start: 2.25, end: 3 }];
     const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'melody' });
     session.start({ chords, sectionLengthBeats: 20 });
 
     await wait(80); // past the count-in -- chord backing gets scheduled all at once right here
-    expect(playNoteAt).toHaveBeenCalled();
+    expect(playNoteForDuration).toHaveBeenCalled();
 
     const secondsPerBeat = 60 / FAST_TEMPO;
     const COUNT_IN_BEATS = 4;
     const PICKUP_BEATS = 4;
     const expectedWhen = 0.05 + (COUNT_IN_BEATS + PICKUP_BEATS + 2.25) * secondsPerBeat;
-    for (const [, , when] of playNoteAt.mock.calls) {
+    for (const [, , when] of playNoteForDuration.mock.calls) {
       expect(when).toBeCloseTo(expectedWhen, 10);
     }
   });

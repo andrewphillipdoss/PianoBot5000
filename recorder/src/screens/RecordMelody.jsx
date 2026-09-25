@@ -12,8 +12,8 @@ import './shared.css';
  * (there's no "I'm finished early" signal to give here, since the
  * length is already fixed).
  */
-export default function RecordMelody({ title, sectionLabel, tempo, chordsResult, onBack, onDone }) {
-  const { phase, result, error, start, restart, handleMidiMessage } = useRecordingSession({ tempo, mode: 'melody' });
+export default function RecordMelody({ title, sectionLabel, tempo, subdivisionsPerBeat, chordsResult, onBack, onDone }) {
+  const { phase, result, error, start, restart, handleMidiMessage } = useRecordingSession({ tempo, mode: 'melody', subdivisionsPerBeat });
   const midi = useMidi();
 
   useEffect(() => midi.subscribe(handleMidiMessage), [midi, handleMidiMessage]);

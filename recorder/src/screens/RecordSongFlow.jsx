@@ -41,6 +41,7 @@ export default function RecordSongFlow({ onCancel, onSaved, saveSong }) {
         title={song.title}
         sectionLabel={SECTION_LABEL}
         tempo={song.tempo}
+        subdivisionsPerBeat={song.subdivisionsPerBeat}
         onBack={() => setScreen('setup')}
         onDone={(result) => {
           setChordsResult(result);
@@ -75,6 +76,7 @@ export default function RecordSongFlow({ onCancel, onSaved, saveSong }) {
         title={song.title}
         sectionLabel={SECTION_LABEL}
         tempo={song.tempo}
+        subdivisionsPerBeat={song.subdivisionsPerBeat}
         chordsResult={chordsResult}
         onBack={() => setScreen('chordsReview')}
         onDone={(result) => {
@@ -107,6 +109,7 @@ export default function RecordSongFlow({ onCancel, onSaved, saveSong }) {
           title: song.title,
           key: song.key,
           tempo: song.tempo,
+          quantization: song.subdivisionsPerBeat,
           sectionLabel: SECTION_LABEL,
           sectionLengthBeats: chordsResult.sectionLengthBeats,
           chords: chordsResult.chords,

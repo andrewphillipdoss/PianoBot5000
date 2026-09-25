@@ -25,10 +25,17 @@
  */
 
 let audioContext = null;
-const activeVoices = new Map(); // pitch -> { oscillators, master }
+const activeVoices = new Map(); // pitch -> { oscillators, master } -- the live (duration-unknown-in-advance) path
+const scheduledVoices = new Set(); // { oscillators, master } -- the known-duration path (playNoteForDuration); see there for why these are tracked separately
 
 const HARMONICS = [1, 2, 3]; // fundamental + two overtones
 const HARMONIC_GAINS = [1, 0.25, 0.1];
+
+const ATTACK_SECONDS = 0.005;
+const DECAY_SECONDS = 0.6; // matches the live envelope's "decays even while held" shape
+const SUSTAIN_RATIO = 0.15;
+const RELEASE_SECONDS = 0.15;
+const MIN_GAIN = 0.0001; // exponentialRampToValueAtTime can't target exactly 0
 
 const CLICK_FREQUENCY = { strong: 1500, weak: 900 }; // downbeat vs. the rest
 const CLICK_GAIN = { strong: 0.25, weak: 0.15 };
@@ -88,13 +95,98 @@ export function playNote(pitch, velocity = 90) {
   playNoteAt(pitch, velocity, audioContext.currentTime);
 }
 
-/** Silence everything currently sounding, e.g. when sound feedback is toggled off. */
+/**
+ * Schedule a note with a known start time AND known duration -- chord
+ * backing, song playback -- as one continuous, fully analytic gain
+ * envelope (attack -> decay -> hold -> release to true silence),
+ * computed entirely from `when`/`durationSeconds` up front.
+ *
+ * Deliberately NOT built out of playNoteAt()+stopNoteAt(): that pair's
+ * stopNoteAt reads the gain's *current* value (audioContext.currentTime,
+ * effectively "now" at the instant the JS runs) and re-inserts it at a
+ * future `when`. That's fine for live playing, where `when` really is
+ * "now" -- but for anything scheduled ahead of time (chord backing and
+ * song playback are both now scheduled arbitrarily far in advance, see
+ * recordingSession.js's _scheduleChordBacking), that stale read
+ * silently uses the wrong value and creates a real discontinuity in
+ * the curve at that future instant -- an audible click or pop. Nothing
+ * here ever reads an AudioParam's `.value`, so there's no stale read
+ * to have.
+ */
+export function playNoteForDuration(pitch, velocity, when, durationSeconds) {
+  if (!audioContext) return;
+
+  const baseFreq = midiToFrequency(pitch);
+  const peakGain = Math.min(1, velocity / 127) * 0.3;
+  const sustainGain = Math.max(peakGain * SUSTAIN_RATIO, MIN_GAIN);
+
+  const attackEnd = when + Math.min(ATTACK_SECONDS, durationSeconds / 2);
+  const decayEnd = when + Math.min(DECAY_SECONDS, durationSeconds);
+  const releaseStart = when + durationSeconds;
+  const releaseEnd = releaseStart + RELEASE_SECONDS;
+
+  const master = audioContext.createGain();
+  master.gain.setValueAtTime(0, when);
+  master.gain.linearRampToValueAtTime(peakGain, attackEnd);
+  master.gain.exponentialRampToValueAtTime(sustainGain, decayEnd);
+  // decayEnd's own value is already exactly sustainGain -- only need an
+  // explicit hold point when release starts later than that (a note
+  // longer than the decay), so there's something for the release ramp
+  // below to ramp down *from*.
+  if (releaseStart > decayEnd) {
+    master.gain.setValueAtTime(sustainGain, releaseStart);
+  }
+  master.gain.linearRampToValueAtTime(0, releaseEnd); // true silence, not the 0.0001 floor -- no truncation click when the oscillator stops
+  master.connect(audioContext.destination);
+
+  const oscillators = HARMONICS.map((multiple, i) => {
+    const osc = audioContext.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(baseFreq * multiple, when);
+    const harmonicGain = audioContext.createGain();
+    harmonicGain.gain.value = HARMONIC_GAINS[i];
+    osc.connect(harmonicGain);
+    harmonicGain.connect(master);
+    osc.start(when);
+    osc.stop(releaseEnd + 0.02);
+    return osc;
+  });
+
+  const voice = { oscillators, master };
+  scheduledVoices.add(voice);
+  // Self-cleanup once it's naturally finished -- stopAllNotes() (below)
+  // is the *early*-cutoff path and removes it from this set itself.
+  setTimeout(() => scheduledVoices.delete(voice), Math.max(0, (releaseEnd - audioContext.currentTime) * 1000));
+}
+
+function stopVoiceImmediately(voice, releaseSeconds) {
+  const now = audioContext.currentTime;
+  // Reading `.value` here is safe -- unlike the stale-read problem
+  // playNoteForDuration exists to avoid, this always runs at real
+  // "now", never at a future scheduled time.
+  voice.master.gain.cancelScheduledValues(now);
+  voice.master.gain.setValueAtTime(voice.master.gain.value, now);
+  voice.master.gain.linearRampToValueAtTime(0, now + releaseSeconds);
+  for (const osc of voice.oscillators) {
+    try {
+      osc.stop(now + releaseSeconds + 0.02);
+    } catch {
+      // Already stopped (its own natural release already finished) -- fine, nothing left to cut off.
+    }
+  }
+}
+
+/** Silence everything currently sounding, e.g. when sound feedback is toggled off, or playback/a take is cut short. */
 export function stopAllNotes(releaseSeconds = 0.05) {
   if (!audioContext) return;
   const now = audioContext.currentTime;
   for (const pitch of [...activeVoices.keys()]) {
     stopNoteAt(pitch, now, releaseSeconds);
   }
+  for (const voice of scheduledVoices) {
+    stopVoiceImmediately(voice, releaseSeconds);
+  }
+  scheduledVoices.clear();
 }
 
 export function stopNoteAt(pitch, when, releaseSeconds = 0.15) {

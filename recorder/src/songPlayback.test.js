@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { playNoteAt, stopAllNotes } from './pianoSynth.js';
+import { playNoteForDuration, stopAllNotes } from './pianoSynth.js';
 import { playSong } from './songPlayback.js';
 
 vi.mock('./pianoSynth.js', () => ({
   enableAudio: vi.fn(() => Promise.resolve()),
   getAudioContext: () => ({ currentTime: 0 }),
-  playNoteAt: vi.fn(),
-  stopNoteAt: vi.fn(),
+  playNoteForDuration: vi.fn(),
   stopAllNotes: vi.fn(),
 }));
 
@@ -20,7 +19,7 @@ function wait(ms) {
 
 describe('playSong', () => {
   it('schedules both chords (parsed back from their saved symbols) and melody notes at their correct audio times', async () => {
-    playNoteAt.mockClear();
+    playNoteForDuration.mockClear();
     const chartData = {
       tempo: TEMPO,
       sections: [{ label: 'A', start_beat: 0, end_beat: 8 }],
@@ -30,21 +29,21 @@ describe('playSong', () => {
     await playSong(chartData);
 
     // The chord's three voiced pitches -- C major (root pitch class 0) -- all land at beat 0.
-    const chordCalls = playNoteAt.mock.calls.filter(([pitch]) => [48, 52, 55].includes(pitch));
+    const chordCalls = playNoteForDuration.mock.calls.filter(([pitch]) => [48, 52, 55].includes(pitch));
     expect(chordCalls).toHaveLength(3);
     for (const [, , when] of chordCalls) {
       expect(when).toBeCloseTo(ANCHOR + 0 * SPB, 10);
     }
 
     // The melody note (G4, pitch 67) lands at beat 2.
-    const melodyCall = playNoteAt.mock.calls.find(([pitch]) => pitch === 67);
+    const melodyCall = playNoteForDuration.mock.calls.find(([pitch]) => pitch === 67);
     expect(melodyCall).toBeDefined();
     expect(melodyCall[1]).toBe(90); // velocity carried through as-is
     expect(melodyCall[2]).toBeCloseTo(ANCHOR + 2 * SPB, 10);
   });
 
   it('starts from a pickup note (negative beat) rather than clipping it', async () => {
-    playNoteAt.mockClear();
+    playNoteForDuration.mockClear();
     const chartData = {
       tempo: TEMPO,
       sections: [{ label: 'A', start_beat: 0, end_beat: 8 }],
@@ -53,14 +52,14 @@ describe('playSong', () => {
     };
     await playSong(chartData);
 
-    const melodyCall = playNoteAt.mock.calls.find(([pitch]) => pitch === 72);
+    const melodyCall = playNoteForDuration.mock.calls.find(([pitch]) => pitch === 72);
     expect(melodyCall).toBeDefined();
     // startBeat is -2 (the pickup note itself), so it plays right at the anchor time, not 2 beats into it.
     expect(melodyCall[2]).toBeCloseTo(ANCHOR, 10);
   });
 
   it('skips a chord symbol it cannot parse instead of throwing', async () => {
-    playNoteAt.mockClear();
+    playNoteForDuration.mockClear();
     const chartData = {
       tempo: TEMPO,
       sections: [{ label: 'A', start_beat: 0, end_beat: 4 }],
@@ -68,7 +67,7 @@ describe('playSong', () => {
       melody: [],
     };
     await expect(playSong(chartData)).resolves.not.toThrow();
-    expect(playNoteAt).not.toHaveBeenCalled();
+    expect(playNoteForDuration).not.toHaveBeenCalled();
   });
 
   it('stop() silences everything and cancels the pending onDone', async () => {

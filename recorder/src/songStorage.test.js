@@ -65,6 +65,7 @@ describe('buildChartData', () => {
       title: 'Amazing Grace',
       key: 'C',
       tempo: 76,
+      quantization: 4, // not passed above -- defaults to 16th notes
       sections: [{ label: 'A', start_beat: 0, end_beat: 16 }],
       chords: [
         { beat: 0, duration_beats: 4, chord: 'C' },
@@ -72,6 +73,20 @@ describe('buildChartData', () => {
       ],
       melody: [{ beat: 0, duration_beats: 1, pitch: 60, velocity: 90 }],
     });
+  });
+
+  it('saves an explicitly chosen quantization instead of defaulting', () => {
+    const chart = buildChartData({
+      title: 'Amazing Grace',
+      key: 'C',
+      tempo: 76,
+      quantization: 8, // 32nd notes
+      sectionLabel: 'A',
+      sectionLengthBeats: 16,
+      chords: [],
+      melody: [],
+    });
+    expect(chart.quantization).toBe(8);
   });
 });
 

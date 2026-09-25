@@ -8,7 +8,7 @@
  * starts). No count-in -- this is "hear the song," not a take.
  */
 
-import { enableAudio, getAudioContext, playNoteAt, stopAllNotes, stopNoteAt } from './pianoSynth.js';
+import { enableAudio, getAudioContext, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
 import { parseChordSymbol, voiceChordSimple } from './theory.js';
 
 const CHORD_VELOCITY = 70;
@@ -39,16 +39,15 @@ export async function playSong(chartData, { onDone } = {}) {
     const when = audioTimeForBeat(chordEntry.beat);
     const durationSeconds = chordEntry.duration_beats * secondsPerBeat;
     for (const pitch of voiceChordSimple(parsed.rootPitchClass, parsed.quality)) {
-      playNoteAt(pitch, CHORD_VELOCITY, when);
-      stopNoteAt(pitch, when + durationSeconds * 0.95); // a hair of detach so consecutive chords read as distinct hits
+      // 0.95x: a hair of detach so consecutive chords read as distinct hits, not one smeared-together tone.
+      playNoteForDuration(pitch, CHORD_VELOCITY, when, durationSeconds * 0.95);
     }
   }
 
   for (const note of chartData.melody) {
     const when = audioTimeForBeat(note.beat);
     const durationSeconds = note.duration_beats * secondsPerBeat;
-    playNoteAt(note.pitch, note.velocity, when);
-    stopNoteAt(note.pitch, when + durationSeconds * 0.95);
+    playNoteForDuration(note.pitch, note.velocity, when, durationSeconds * 0.95);
   }
 
   const totalSeconds = (endBeat - startBeat) * secondsPerBeat;

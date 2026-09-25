@@ -1,17 +1,26 @@
 import { useState } from 'react';
+import { DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT } from '../recordingPipeline.js';
 import './shared.css';
 
+// value = subdivisions/beat that theory.js's quantizeNotes expects.
+const QUANTIZATION_OPTIONS = [
+  { value: 2, label: '8th notes' },
+  { value: 4, label: '16th notes' },
+  { value: 8, label: '32nd notes' },
+];
+
 /**
- * Song-level setup -- title/key/tempo -- asked once, before the
- * per-section record loop begins (see the design discussion: this is
- * deliberately its own screen, not combined with the chords-recording
- * console, so there's never a text input focused on the same screen
- * spacebar is used to start/stop recording).
+ * Song-level setup -- title/key/tempo/quantization -- asked once,
+ * before the per-section record loop begins (see the design
+ * discussion: this is deliberately its own screen, not combined with
+ * the chords-recording console, so there's never a text input focused
+ * on the same screen spacebar is used to start/stop recording).
  */
 export default function SongSetup({ onBack, onSubmit }) {
   const [title, setTitle] = useState('');
   const [key, setKey] = useState('C');
   const [tempo, setTempo] = useState(96);
+  const [subdivisionsPerBeat, setSubdivisionsPerBeat] = useState(DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT);
 
   const canSubmit = title.trim().length > 0 && key.trim().length > 0 && Number(tempo) > 0;
 
@@ -35,6 +44,14 @@ export default function SongSetup({ onBack, onSubmit }) {
           Tempo
           <input type="number" value={tempo} onChange={(e) => setTempo(e.target.value)} min="20" max="300" />
         </label>
+        <label className="field" style={{ width: 150 }}>
+          Quantization
+          <select value={subdivisionsPerBeat} onChange={(e) => setSubdivisionsPerBeat(Number(e.target.value))}>
+            {QUANTIZATION_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="actions-row" style={{ justifyContent: 'flex-end', gap: 12 }}>
@@ -46,7 +63,7 @@ export default function SongSetup({ onBack, onSubmit }) {
         <button
           className="btn-primary"
           disabled={!canSubmit}
-          onClick={() => onSubmit({ title: title.trim(), key: key.trim(), tempo: Number(tempo) })}
+          onClick={() => onSubmit({ title: title.trim(), key: key.trim(), tempo: Number(tempo), subdivisionsPerBeat })}
         >
           Start Recording Chords &rarr;
         </button>

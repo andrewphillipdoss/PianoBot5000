@@ -12,6 +12,7 @@
  * faked directory handle, not unit tested).
  */
 
+import { DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT } from './recordingPipeline.js';
 import { formatChordSymbol } from './theory.js';
 
 // ---------------------------------------------------------------------------
@@ -39,12 +40,20 @@ export function chartFileName(title) {
  * this is where they get translated into the on-disk field names
  * (`beat`/`duration_beats`/...) and the chord objects get turned into
  * plain lead-sheet symbol strings.
+ *
+ * `quantization` (subdivisions/beat -- see recordingPipeline.js) isn't
+ * part of the legacy CLI's own chart format, but the legacy reader
+ * ignores unknown top-level keys, so it round-trips harmlessly here:
+ * re-recording an already-saved song reads it back out and keeps using
+ * the same grid it was originally recorded at, rather than silently
+ * resetting to the default.
  */
-export function buildChartData({ title, key, tempo, sectionLabel, sectionLengthBeats, chords, melody }) {
+export function buildChartData({ title, key, tempo, quantization = DEFAULT_QUANTIZE_SUBDIVISIONS_PER_BEAT, sectionLabel, sectionLengthBeats, chords, melody }) {
   return {
     title,
     key,
     tempo,
+    quantization,
     sections: [{ label: sectionLabel, start_beat: 0, end_beat: sectionLengthBeats }],
     chords: chords.map((c) => ({
       beat: c.start,

@@ -87,6 +87,21 @@ describe('processChordsPass', () => {
     // One merged entry spanning both bars, not two identical "C" entries.
     expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', start: 0, end: 8 }]);
   });
+
+  it('quantizes onto a coarser grid when a coarser subdivision is requested (8th notes)', () => {
+    // Struck slightly after beat 4 -- with the default 16th-note grid
+    // this would snap to 4.25, not 4.5.
+    const messages = [
+      { timestamp: 4.3 * SPB, type: 'noteon', note: 48, velocity: 90 },
+      { timestamp: 4.3 * SPB, type: 'noteon', note: 52, velocity: 90 },
+      { timestamp: 4.3 * SPB, type: 'noteon', note: 55, velocity: 90 },
+      { timestamp: 5 * SPB, type: 'noteoff', note: 48, velocity: 0 },
+      { timestamp: 5 * SPB, type: 'noteoff', note: 52, velocity: 0 },
+      { timestamp: 5 * SPB, type: 'noteoff', note: 55, velocity: 0 },
+    ];
+    const { chords } = processChordsPass(messages, TEMPO, 8 * SPB, 2); // 2 subdivisions/beat = 8th notes
+    expect(chords[0].start).toBe(4.5); // snaps to the nearest half-beat, not the nearest 16th
+  });
 });
 
 describe('processMelodyPass', () => {
@@ -107,6 +122,17 @@ describe('processMelodyPass', () => {
     expect(notes[0]).toEqual({ pitch: 60, start: 0, end: 1, velocity: 90 });
     expect(notes[1].start).toBeCloseTo(15.5, 5); // 15.6 snaps to the nearest 16th-note grid point
     expect(notes[1].end).toBe(16); // clipped to the section boundary, not 16.5
+  });
+
+  it('quantizes melody notes onto whatever subdivision is requested (32nd notes)', () => {
+    const messages = [
+      { timestamp: (PICKUP_BEATS + 2.35) * SPB, type: 'noteon', note: 67, velocity: 90 },
+      { timestamp: (PICKUP_BEATS + 3) * SPB, type: 'noteoff', note: 67, velocity: 0 },
+    ];
+    const { notes } = processMelodyPass(messages, TEMPO, 16, 8); // 8 subdivisions/beat = 32nd notes
+    // 2.35 snaps to 2.375, the nearest 1/8-beat (32nd-note) grid point --
+    // with the default 16th-note grid it would instead snap to 2.25.
+    expect(notes[0].start).toBeCloseTo(2.375, 5);
   });
 
   it('drops a note that starts at or after the section boundary entirely', () => {

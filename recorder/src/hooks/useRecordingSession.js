@@ -9,12 +9,13 @@ import { RecordingSession } from '../recordingSession.js';
  * `subscribe()` so captured notes reach it, and call
  * `start`/`stop`/`restart` from UI.
  *
- * `tempo`/`mode` are only read once, at construction -- this hook
- * doesn't react to them changing later. If a screen ever needs a
- * different tempo/mode, remount it (e.g. a React `key` keyed on
- * those values) rather than expect this hook to pick up a change.
+ * `tempo`/`mode`/`subdivisionsPerBeat` are only read once, at
+ * construction -- this hook doesn't react to them changing later. If a
+ * screen ever needs different values, remount it (e.g. a React `key`
+ * keyed on those values) rather than expect this hook to pick up a
+ * change.
  */
-export function useRecordingSession({ tempo, mode }) {
+export function useRecordingSession({ tempo, mode, subdivisionsPerBeat }) {
   const [phase, setPhase] = useState('idle');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -26,7 +27,7 @@ export function useRecordingSession({ tempo, mode }) {
   // Some lint rules flag any ref access during render on principle;
   // this specific shape is the sanctioned exception.
   if (!sessionRef.current) {
-    sessionRef.current = new RecordingSession({ tempo, mode, onPhaseChange: setPhase, onDone: setResult, onError: setError });
+    sessionRef.current = new RecordingSession({ tempo, mode, subdivisionsPerBeat, onPhaseChange: setPhase, onDone: setResult, onError: setError });
   }
 
   useEffect(() => () => sessionRef.current?.cancel(), []);

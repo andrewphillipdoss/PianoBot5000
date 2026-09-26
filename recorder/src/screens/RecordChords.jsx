@@ -21,8 +21,8 @@ import './shared.css';
  * where an *already-captured* take gets re-derived at a new
  * quantization/tempo instead.
  */
-export default function RecordChords({ title, sectionLabel, tempo, onTempoChange, subdivisionsPerBeat, onSubdivisionsPerBeatChange, onBack, onDone }) {
-  const { phase, result, error, start, stop, handleMidiMessage } = useRecordingSession({ tempo, mode: 'chords', subdivisionsPerBeat });
+export default function RecordChords({ title, sectionLabel, tempo, onTempoChange, subdivisionsPerBeat, onSubdivisionsPerBeatChange, beatsPerBar, onBack, onDone }) {
+  const { phase, result, error, start, stop, handleMidiMessage } = useRecordingSession({ tempo, mode: 'chords', subdivisionsPerBeat, beatsPerBar });
   const midi = useMidi();
 
   // Feed the shared MIDI stream into this screen's recording session

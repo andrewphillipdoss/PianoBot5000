@@ -19,7 +19,8 @@ import {
   trimTrailingEmptyBars,
 } from './theory.js';
 
-export const BEATS_PER_BAR = 4;
+export const DEFAULT_BEATS_PER_BAR = 4; // a plain quarter-note beat per the time signature's numerator -- 3 for 3/4, 4 for 4/4, etc. (compound meters like 6/8 aren't modeled separately; pick the beat count that reads naturally)
+export const BEATS_PER_BAR = DEFAULT_BEATS_PER_BAR; // kept as the fallback default throughout this file/its callers for a song that doesn't say otherwise
 
 // One bar of lead-in captured before the chords start playing back
 // during a melody pass, so pickup/anacrusis notes have somewhere to
@@ -92,8 +93,19 @@ const CHORD_CLUSTER_THRESHOLD_BEATS = 0.35;
  * the chord as a wrong extra pitch class, or breaks recognition
  * outright (detectChords throws on a cluster that doesn't form a
  * recognized shape).
+ *
+ * `beatsPerBar` is the song's time signature (its numerator, treating
+ * the beat as a quarter note) -- defaults to 4/4, but the trailing-
+ * silence trim and the 4-bar rounding both measure "a bar" in these
+ * terms, so a 3/4 song's bars/pickup/count-in are 3 beats long, not 4.
  */
-export function processChordsPass(rawMessages, tempo, captureDurationSeconds, subdivisionsPerBeat = DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT) {
+export function processChordsPass(
+  rawMessages,
+  tempo,
+  captureDurationSeconds,
+  subdivisionsPerBeat = DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
+  beatsPerBar = DEFAULT_BEATS_PER_BAR
+) {
   // endTimestamp = the capture boundary itself, so a chord still held
   // when stop() was pressed (the normal case) closes there instead of
   // being dropped for never getting an explicit note-off.
@@ -112,8 +124,8 @@ export function processChordsPass(rawMessages, tempo, captureDurationSeconds, su
   });
 
   const rawTotalBeats = captureDurationSeconds * (tempo / 60);
-  const trimmedBeats = trimTrailingEmptyBars(rawTotalBeats, chords.map((c) => c.start), BEATS_PER_BAR);
-  const sectionLengthBeats = roundToBarInterval(trimmedBeats, 4, BEATS_PER_BAR);
+  const trimmedBeats = trimTrailingEmptyBars(rawTotalBeats, chords.map((c) => c.start), beatsPerBar);
+  const sectionLengthBeats = roundToBarInterval(trimmedBeats, 4, beatsPerBar);
 
   return { chords, sectionLengthBeats };
 }

@@ -18,7 +18,16 @@ change since:
 1. **My Songs** -- lists every chart JSON file in a folder you pick once
    (remembered across reloads via IndexedDB; re-grant permission with one
    click if the browser ever forgets).
-2. **Add a Song** -- title/key/tempo, once per song. Quantization
+2. **Add a Song** -- title/key/tempo/time signature, once per song.
+   Time signature (2/4 through 6/4 -- compound meters like 6/8 aren't
+   modeled separately, pick whichever beat count reads naturally) sets
+   the count-in length, the metronome's accent pattern, and the default
+   pickup-bar length, and is changeable later too: on the record screens
+   (it's part of what forces a fresh take there, see below) and from an
+   already-saved song's Song view, same as tempo -- section start/end
+   beats are already fixed, so changing it there only changes how many
+   "bars" they're displayed as and future recording, never the
+   already-saved chord/melody positions. Quantization
    (quarter/8th/16th/32nd notes) lives on the record screens themselves
    instead (see below) -- chords default to 8th notes, melody to 16th,
    and both are changeable there in every mode, re-record included --
@@ -69,12 +78,15 @@ change since:
    editable tempo (every chord/melody beat is stored in beats, not
    seconds, so this only ever changes future playback speed -- nothing
    about the recorded data itself needs to change), a quantization
-   picker (re-snaps the saved chart to a new grid, no re-recording), an
-   optional metronome for playback (off by default -- "hear the song,"
-   not a take -- on by request, e.g. to follow along precisely), **+ Add
-   Section** (appends a new section to this already-saved song), and
-   Re-record Chords/Melody for *any* section, not just the last (see
-   below for how).
+   picker (re-snaps the saved chart to a new grid, no re-recording), a
+   time signature picker (see above), an optional metronome for playback
+   (off by default -- "hear the song," not a take -- on by request, e.g.
+   to follow along precisely), **+ Add Section** (appends a new section
+   to this already-saved song), Re-record Chords/Melody for *any*
+   section, not just the last (see below for how), and **Delete Song**
+   (a native `confirm()` prompt, not just a styled button -- there's no
+   undo once a chart file is gone; `songStorage.js`'s `deleteChartFile`
+   just calls the folder handle's own `removeEntry`).
 
 **Multi-section songs lay out sequentially on one shared beat timeline**
 (section B starts exactly where A ends) -- both "add a section" entry
@@ -143,6 +155,40 @@ main-thread contention; deriving it instead from `start()`'s own
 timestamp plus the nominal count-in duration makes it immune to that,
 and ties note timestamps to the exact same clock the audible
 click/chord-backing schedule already uses.
+
+**A screen's idle-screen setting pickers (quantization, snap strength,
+the pickup checkbox, tempo, time signature) must force a fresh
+`RecordingSession` when changed, not just update what's displayed** --
+`useRecordingSession.js` only ever reads its settings once, at
+construction (a plain lazy-ref singleton, React's own documented pattern
+for "build this once without `useEffect`"), so changing one of these on
+`RecordChords`/`RecordMelody`'s own idle screen updated the picker itself
+and the eventually-saved chart, but silently left the *actual upcoming
+take* still using whatever was set when that screen first mounted -- a
+real bug this project shipped once. The fix is a React `key` on
+`<RecordChords>`/`<RecordMelody>` in `RecordSongFlow.jsx`, keyed on
+exactly the settings that must trigger a new take, forcing a full
+remount (and a fresh `RecordingSession`) the moment any of them changes
+while still on the idle screen -- not a change to the hook itself, which
+still only reads its props once by design. Caught by making a
+Playwright check *actively poll* intermediate states rather than just
+wait for a final one to appear; a wait-for-text check has a blind spot
+for a state (like a brief pickup bar) that starts and ends before the
+wait resolves.
+
+**A multi-section chart's entries live on one shared *global* beat
+timeline, but a section's own display (`MelodyRoll`, the record/review
+screens) expects beats relative to that section's own downbeat** -- 0 =
+this section's start, negative = its own pickup notes. Section A's
+`start_beat` is 0, so global and section-relative coordinates are
+identical there by coincidence, which is exactly why a later section's
+melody could go on rendering as empty (SongView's own copy of this
+rebase was missing) without Section A ever showing the bug. Also: the
+Chord Chart panel's row wrapping (`chordChartLayout.js`, above) caps rows
+by bar count, not pixel width -- CSS `flex-wrap` on `.chord-bar-row` is a
+safety net under that, for the case where enough short chords' `min-width`
+floors alone add up past the panel's actual width even within one
+nominally-fitting row.
 
 **Deliberately out of scope for now** (see the design discussion in this
 repo's history for why): real lead-sheet notation rendering (the

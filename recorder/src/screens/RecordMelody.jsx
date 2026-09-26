@@ -36,6 +36,7 @@ export default function RecordMelody({
   hasPickupBar,
   onHasPickupBarChange,
   pickupBeats,
+  beatsPerBar,
   chordsResult,
   onBack,
   onDone,
@@ -46,6 +47,7 @@ export default function RecordMelody({
     subdivisionsPerBeat,
     quantizeStrength,
     pickupBeats,
+    beatsPerBar,
   });
   const midi = useMidi();
 
@@ -102,6 +104,7 @@ export default function RecordMelody({
           chords={chordsResult.chords}
           renderLabel={(chord) => formatChordSymbol(chord.rootPitchClass, chord.quality)}
           barStyle={{ fontSize: 14, padding: '10px 6px' }}
+          beatsPerBar={beatsPerBar}
         />
       </div>
 

@@ -12,7 +12,7 @@ const PITCH_PADDING = 2; // semitones of headroom above/below the notes actually
  * as bar width. A shaded band covers any pickup-bar beats (negative
  * beat positions, before the section's own downbeat at beat 0).
  */
-export default function MelodyRoll({ notes, sectionLengthBeats }) {
+export default function MelodyRoll({ notes, sectionLengthBeats, beatsPerBar = 4 }) {
   if (notes.length === 0) {
     return <span style={{ color: 'var(--ink-soft)', fontSize: 14 }}>No melody recorded</span>;
   }
@@ -33,7 +33,7 @@ export default function MelodyRoll({ notes, sectionLengthBeats }) {
   const yForPitch = (pitch) => (maxPitch - pitch) * ROW_HEIGHT;
 
   const barLines = [];
-  for (let beat = Math.ceil(minBeat / 4) * 4; beat <= maxBeat; beat += 4) {
+  for (let beat = Math.ceil(minBeat / beatsPerBar) * beatsPerBar; beat <= maxBeat; beat += beatsPerBar) {
     barLines.push(beat);
   }
 

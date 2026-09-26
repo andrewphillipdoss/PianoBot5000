@@ -12,7 +12,7 @@
  * faked directory handle, not unit tested).
  */
 
-import { DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT, DEFAULT_MELODY_QUANTIZE_STRENGTH, DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT, PICKUP_BEATS } from './recordingPipeline.js';
+import { DEFAULT_BEATS_PER_BAR, DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT, DEFAULT_MELODY_QUANTIZE_STRENGTH, DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT } from './recordingPipeline.js';
 import { formatChordSymbol, parseChordSymbol, quantizeBeat } from './theory.js';
 
 // ---------------------------------------------------------------------------
@@ -37,27 +37,32 @@ export function chartFileName(title) {
  * song is built up from by appending sections onto it one at a time
  * (see `appendSectionData`).
  *
- * `chordsQuantization`/`melodyQuantization` (subdivisions/beat),
- * `melodyQuantizeStrength` (how hard melody notes snap to that grid),
- * and `melodyPickupBeats` (how much lead-in melody capture gives a
- * pickup note before the chords enter -- 0 skips the pickup bar
- * entirely; see recordingPipeline.js) aren't part of the legacy CLI's
- * own chart format, but the legacy reader ignores unknown top-level
- * keys, so they round-trip harmlessly here: re-recording an
- * already-saved song reads them back out and keeps using the same
- * settings it was originally recorded with, rather than silently
- * resetting to the default.
+ * `beatsPerBar` (the time signature's numerator, treating the beat as
+ * a quarter note -- 3 for 3/4, 4 for 4/4, etc.), `chordsQuantization`/
+ * `melodyQuantization` (subdivisions/beat), `melodyQuantizeStrength`
+ * (how hard melody notes snap to that grid), and `melodyPickupBeats`
+ * (how much lead-in melody capture gives a pickup note before the
+ * chords enter -- 0 skips the pickup bar entirely; see
+ * recordingPipeline.js) aren't part of the legacy CLI's own chart
+ * format, but the legacy reader ignores unknown top-level keys, so
+ * they round-trip harmlessly here: re-recording an already-saved song
+ * reads them back out and keeps using the same settings it was
+ * originally recorded with, rather than silently resetting to the
+ * default. `melodyPickupBeats` defaults to a full bar of *whatever*
+ * `beatsPerBar` is, not a fixed 4, since a bar's own length depends on
+ * the time signature.
  */
 export function emptyChartData({
   title,
   key,
   tempo,
+  beatsPerBar = DEFAULT_BEATS_PER_BAR,
   chordsQuantization = DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
   melodyQuantization = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
   melodyQuantizeStrength = DEFAULT_MELODY_QUANTIZE_STRENGTH,
-  melodyPickupBeats = PICKUP_BEATS,
+  melodyPickupBeats = beatsPerBar,
 }) {
-  return { title, key, tempo, chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats, sections: [], chords: [], melody: [] };
+  return { title, key, tempo, beatsPerBar, chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats, sections: [], chords: [], melody: [] };
 }
 
 /**
@@ -66,15 +71,23 @@ export function emptyChartData({
  * `quantization` field, applied to both) or before `melodyQuantizeStrength`/
  * `melodyPickupBeats` existed at all -- falls back through those, then
  * to the current defaults, so an old file never throws or silently
- * loses its own recorded settings.
+ * loses its own recorded settings. `melodyPickupBeats` falls back to a
+ * full bar of the chart's own `beatsPerBar` (itself defaulting to 4/4
+ * for a chart saved before time signature existed), not a fixed 4.
  */
 export function readChartQuantization(chartData) {
+  const beatsPerBar = chartData.beatsPerBar ?? DEFAULT_BEATS_PER_BAR;
   return {
     chordsQuantization: chartData.chordsQuantization ?? chartData.quantization ?? DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
     melodyQuantization: chartData.melodyQuantization ?? chartData.quantization ?? DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
     melodyQuantizeStrength: chartData.melodyQuantizeStrength ?? DEFAULT_MELODY_QUANTIZE_STRENGTH,
-    melodyPickupBeats: chartData.melodyPickupBeats ?? PICKUP_BEATS,
+    melodyPickupBeats: chartData.melodyPickupBeats ?? beatsPerBar,
   };
+}
+
+/** A chart's time signature (beats/bar), tolerating a chart saved before it existed (4/4). */
+export function readChartBeatsPerBar(chartData) {
+  return chartData.beatsPerBar ?? DEFAULT_BEATS_PER_BAR;
 }
 
 /** 0 -> "A", 1 -> "B", ... -- this app's whole section-labeling scheme, single letters in order recorded. */
@@ -163,7 +176,7 @@ export function buildChartData({ title, key, tempo, chordsQuantization, melodyQu
  */
 export function entrySectionLabel(entry, sections) {
   if (entry.section != null) return entry.section;
-  const lowerBoundWidening = 'pitch' in entry ? PICKUP_BEATS : 0; // melody entries have a pitch; chord entries don't
+  const lowerBoundWidening = 'pitch' in entry ? DEFAULT_BEATS_PER_BAR : 0; // melody entries have a pitch; chord entries don't. Legacy (untagged) data always predates time signature, so this fallback is always 4/4.
   for (let i = sections.length - 1; i >= 0; i--) {
     const section = sections[i];
     if (entry.beat >= section.start_beat - lowerBoundWidening && entry.beat < section.end_beat) return section.label;
@@ -432,4 +445,9 @@ export async function writeChartFile(dirHandle, fileName, chartData) {
   const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
   await writeChartToHandle(fileHandle, chartData);
   return fileHandle;
+}
+
+/** Permanently remove a song's chart file from the songs folder. There's no undo -- callers confirm with the player first. */
+export async function deleteChartFile(dirHandle, fileName) {
+  await dirHandle.removeEntry(fileName);
 }

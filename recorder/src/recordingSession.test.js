@@ -78,6 +78,15 @@ describe('RecordingSession (chords mode)', () => {
     expect(session.captureStartRealTime).toBeCloseTo(expectedCaptureStart, 0);
   });
 
+  it('count-in length follows a non-default time signature (3/4 -- one 3-beat bar, not 4)', async () => {
+    const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'chords', beatsPerBar: 3 });
+    session.start();
+    await wait(20); // less than a 3-beat (30ms) count-in
+    expect(session.phase).toBe('countIn');
+    await wait(30); // now well past 30ms total -- a 3-beat count-in should have already ended
+    expect(session.phase).toBe('capturing');
+  });
+
   it('cancel() stops everything and goes back to idle', async () => {
     const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'chords' });
     session.start();

@@ -131,6 +131,24 @@ describe('processChordsPass', () => {
     ]);
   });
 
+  it('rounds section length using a non-default time signature\'s own bar length (3/4)', () => {
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 48, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 52, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 55, velocity: 90 },
+      { timestamp: 6 * SPB, type: 'noteoff', note: 48, velocity: 0 },
+      { timestamp: 6 * SPB, type: 'noteoff', note: 52, velocity: 0 },
+      { timestamp: 6 * SPB, type: 'noteoff', note: 55, velocity: 0 },
+    ];
+    // 6 beats captured, no dead air. At 4/4 (default) that rounds up to
+    // one 16-beat (4-bar) unit; at 3/4 a "bar" is 3 beats, so a 4-bar
+    // unit is 12 beats -- 6 beats should round up to that instead.
+    const default4_4 = processChordsPass(messages, TEMPO, 6 * SPB);
+    const time3_4 = processChordsPass(messages, TEMPO, 6 * SPB, 2, 3);
+    expect(default4_4.sectionLengthBeats).toBe(16);
+    expect(time3_4.sectionLengthBeats).toBe(12);
+  });
+
   it('ignores an accidentally brushed extra key instead of failing to recognize the chord', () => {
     const messages = [
       { timestamp: 0, type: 'noteon', note: 48, velocity: 90 }, // C3

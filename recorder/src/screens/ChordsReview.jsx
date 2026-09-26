@@ -6,7 +6,7 @@ import QuantizationSelect from './QuantizationSelect.jsx';
 import TempoInput from './TempoInput.jsx';
 import './shared.css';
 
-const BAR_STEP_BEATS = 16; // one 4-bar unit -- the same step the auto-rounding uses
+const BAR_STEP_UNIT = 4; // nudge the section length by a 4-bar unit -- the same step the auto-rounding uses
 
 /**
  * "Section A: N bars. Adjust?" -- the chords pass is authoritative
@@ -25,21 +25,34 @@ const BAR_STEP_BEATS = 16; // one 4-bar unit -- the same step the auto-rounding 
  * from scratch -- correcting a wrong tempo typed at setup without
  * re-recording, not just a rounding tweak.
  */
-export default function ChordsReview({ title, sectionLabel, tempo, onTempoChange, keySignature, chordsResult, subdivisionsPerBeat, onSubdivisionsPerBeatChange, onReRecord, onProceed }) {
+export default function ChordsReview({
+  title,
+  sectionLabel,
+  tempo,
+  onTempoChange,
+  keySignature,
+  chordsResult,
+  subdivisionsPerBeat,
+  onSubdivisionsPerBeatChange,
+  beatsPerBar = 4,
+  onReRecord,
+  onProceed,
+}) {
   const [chords, setChords] = useState(chordsResult.chords);
   const [sectionLengthBeats, setSectionLengthBeats] = useState(chordsResult.sectionLengthBeats);
-  const bars = sectionLengthBeats / 4;
+  const bars = sectionLengthBeats / beatsPerBar;
+  const barStepBeats = BAR_STEP_UNIT * beatsPerBar;
 
   function handleQuantizationChange(newSubdivisionsPerBeat) {
     onSubdivisionsPerBeatChange(newSubdivisionsPerBeat);
-    const reprocessed = processChordsPass(chordsResult.rawMessages, tempo, chordsResult.captureDurationSeconds, newSubdivisionsPerBeat);
+    const reprocessed = processChordsPass(chordsResult.rawMessages, tempo, chordsResult.captureDurationSeconds, newSubdivisionsPerBeat, beatsPerBar);
     setChords(reprocessed.chords);
     setSectionLengthBeats(reprocessed.sectionLengthBeats);
   }
 
   function handleTempoChange(newTempo) {
     onTempoChange(newTempo);
-    const reprocessed = processChordsPass(chordsResult.rawMessages, newTempo, chordsResult.captureDurationSeconds, subdivisionsPerBeat);
+    const reprocessed = processChordsPass(chordsResult.rawMessages, newTempo, chordsResult.captureDurationSeconds, subdivisionsPerBeat, beatsPerBar);
     setChords(reprocessed.chords);
     setSectionLengthBeats(reprocessed.sectionLengthBeats);
   }
@@ -56,11 +69,11 @@ export default function ChordsReview({ title, sectionLabel, tempo, onTempoChange
         <div className="chip">
           <span className="label">Section length</span>
           <span className="value" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button className="btn-ghost" style={{ padding: '2px 10px' }} onClick={() => setSectionLengthBeats((b) => Math.max(BAR_STEP_BEATS, b - BAR_STEP_BEATS))}>
+            <button className="btn-ghost" style={{ padding: '2px 10px' }} onClick={() => setSectionLengthBeats((b) => Math.max(barStepBeats, b - barStepBeats))}>
               &minus;
             </button>
             {bars} bars
-            <button className="btn-ghost" style={{ padding: '2px 10px' }} onClick={() => setSectionLengthBeats((b) => b + BAR_STEP_BEATS)}>
+            <button className="btn-ghost" style={{ padding: '2px 10px' }} onClick={() => setSectionLengthBeats((b) => b + barStepBeats)}>
               +
             </button>
           </span>
@@ -75,7 +88,7 @@ export default function ChordsReview({ title, sectionLabel, tempo, onTempoChange
 
       <div className="panel">
         <span className="panel-label">Chord chart</span>
-        <ChordChart chords={chords} renderLabel={(chord) => formatChordSymbol(chord.rootPitchClass, chord.quality)} />
+        <ChordChart chords={chords} renderLabel={(chord) => formatChordSymbol(chord.rootPitchClass, chord.quality)} beatsPerBar={beatsPerBar} />
       </div>
 
       <div className="actions-row" style={{ justifyContent: 'flex-end' }}>

@@ -250,7 +250,7 @@
 
 /* Chord bar grid (the "Chord Chart" view -- notation rendering is a separate, later piece) */
 
-/* One row per chordChartLayout.js row -- each already capped at maxBarsPerRow bars' worth, so this never wraps on its own. */
+/* One row per chordChartLayout.js row -- each already capped at maxBarsPerRow bars' worth. */
 .chord-chart-rows {
   display: flex;
   flex-direction: column;
@@ -259,6 +259,14 @@
 
 .chord-bar-row {
   display: flex;
+  flex-wrap: wrap;
+  /* A safety net, not the primary layout mechanism: chordChartLayout.js
+     caps each row by bar count assuming there's enough pixel width to
+     go around, but a row with many short chords can still hit every
+     bar's min-width floor (below) before it runs out of bars -- e.g. a
+     dozen+ quick changes packed into one 8-bar row. Without wrapping,
+     that overflowed the panel instead of degrading gracefully onto a
+     second visual line. */
   gap: 10px;
 }
 

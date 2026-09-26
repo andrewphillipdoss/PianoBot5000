@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { PICKUP_BEATS } from '../recordingPipeline.js';
-import { appendSectionData, emptyChartData, nextSectionLabel, readChartQuantization, replaceSectionData, sectionChordsAsInternal } from '../songStorage.js';
+import { appendSectionData, emptyChartData, nextSectionLabel, readChartBeatsPerBar, readChartQuantization, replaceSectionData, sectionChordsAsInternal } from '../songStorage.js';
 import ChordsReview from './ChordsReview.jsx';
 import RecordChords from './RecordChords.jsx';
 import RecordMelody from './RecordMelody.jsx';
@@ -53,7 +52,11 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
   const isReplacing = mode === 'reRecordChords' || mode === 'reRecordMelody';
   const targetSection = isReplacing ? baseChartData.sections[sectionIndex] : null;
 
-  const [song, setSong] = useState(() => (baseChartData ? { title: baseChartData.title, key: baseChartData.key, tempo: baseChartData.tempo } : null));
+  const [song, setSong] = useState(() =>
+    baseChartData
+      ? { title: baseChartData.title, key: baseChartData.key, tempo: baseChartData.tempo, beatsPerBar: readChartBeatsPerBar(baseChartData) }
+      : null
+  );
   const [{ chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats }, setQuantization] = useState(() =>
     baseChartData ? readChartQuantization(baseChartData) : readChartQuantization({})
   );
@@ -88,7 +91,7 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
           (acc, section) => appendSectionData(acc, section),
           baseChartData ?? emptyChartData({ title: song.title, key: song.key, tempo: song.tempo })
         );
-    chartData = { ...chartData, tempo: song.tempo, chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats }; // whatever settings were actually used for this session, even if they differ from what the chart started with
+    chartData = { ...chartData, tempo: song.tempo, beatsPerBar: song.beatsPerBar, chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats }; // whatever settings were actually used for this session, even if they differ from what the chart started with
     const savedSummary = await saveSong(chartData);
     onSaved(savedSummary);
   }
@@ -108,12 +111,22 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
   if (screen === 'recordChords') {
     return (
       <RecordChords
+        // useRecordingSession only ever reads tempo/subdivisionsPerBeat/
+        // beatsPerBar once, at construction (see its own docstring) --
+        // without a key, changing one of these on this idle screen would
+        // update the *displayed* value here and in the saved chart, but
+        // silently leave the actual upcoming take using whatever was set
+        // when this screen first mounted. Keying on all three forces a
+        // fresh mount (and a fresh RecordingSession) the moment any of
+        // them changes, while the player is still on the idle screen.
+        key={`${chordsQuantization}-${song.tempo}-${song.beatsPerBar}`}
         title={song.title}
         sectionLabel={sectionLabel}
         tempo={song.tempo}
         onTempoChange={handleTempoChange}
         subdivisionsPerBeat={chordsQuantization}
         onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, chordsQuantization: value }))}
+        beatsPerBar={song.beatsPerBar}
         onBack={mode === 'newSong' && completedSections.length === 0 ? () => setScreen('setup') : onCancel}
         onDone={(result) => {
           setChordsResult(result);
@@ -134,6 +147,7 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
         chordsResult={chordsResult}
         subdivisionsPerBeat={chordsQuantization}
         onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, chordsQuantization: value }))}
+        beatsPerBar={song.beatsPerBar}
         onReRecord={() => {
           setChordsResult(null);
           setScreen('recordChords');
@@ -149,6 +163,9 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
   if (screen === 'recordMelody') {
     return (
       <RecordMelody
+        // Same reasoning as RecordChords' key above -- useRecordingSession
+        // only reads these once, at construction.
+        key={`${melodyQuantization}-${melodyQuantizeStrength}-${melodyPickupBeats}-${song.tempo}-${song.beatsPerBar}`}
         title={song.title}
         sectionLabel={sectionLabel}
         tempo={song.tempo}
@@ -158,8 +175,9 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
         quantizeStrength={melodyQuantizeStrength}
         onQuantizeStrengthChange={(value) => setQuantization((q) => ({ ...q, melodyQuantizeStrength: value }))}
         hasPickupBar={melodyPickupBeats > 0}
-        onHasPickupBarChange={(checked) => setQuantization((q) => ({ ...q, melodyPickupBeats: checked ? PICKUP_BEATS : 0 }))}
+        onHasPickupBarChange={(checked) => setQuantization((q) => ({ ...q, melodyPickupBeats: checked ? song.beatsPerBar : 0 }))}
         pickupBeats={melodyPickupBeats}
+        beatsPerBar={song.beatsPerBar}
         chordsResult={chordsResult}
         onBack={mode === 'reRecordMelody' ? onCancel : () => setScreen('chordsReview')}
         onDone={(result) => {
@@ -184,6 +202,7 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
       quantizeStrength={melodyQuantizeStrength}
       onQuantizeStrengthChange={(value) => setQuantization((q) => ({ ...q, melodyQuantizeStrength: value }))}
       pickupBeats={melodyPickupBeats}
+      beatsPerBar={song.beatsPerBar}
       finalizeLabel={mode === 'newSong' || mode === 'addSection' ? 'Finalize Song' : 'Save Changes'}
       onReRecordChords={
         mode === 'reRecordMelody'

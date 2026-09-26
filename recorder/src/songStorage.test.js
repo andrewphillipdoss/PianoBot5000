@@ -8,6 +8,7 @@ import {
   formatRelativeTime,
   mergeConsecutiveChordEntries,
   nextSectionLabel,
+  readChartBeatsPerBar,
   readChartQuantization,
   replaceSectionData,
   sectionChordsAsInternal,
@@ -79,6 +80,7 @@ describe('buildChartData', () => {
       title: 'Amazing Grace',
       key: 'C',
       tempo: 76,
+      beatsPerBar: 4, // not passed above -- defaults to 4/4
       chordsQuantization: 2, // not passed above -- defaults to 8th notes
       melodyQuantization: 4, // not passed above -- defaults to 16th notes
       melodyQuantizeStrength: 0.6, // not passed above -- defaults to the softened snap
@@ -129,6 +131,20 @@ describe('readChartQuantization', () => {
       melodyPickupBeats: 4,
     });
     expect(readChartQuantization({})).toEqual({ chordsQuantization: 2, melodyQuantization: 4, melodyQuantizeStrength: 0.6, melodyPickupBeats: 4 });
+  });
+
+  it('falls back melodyPickupBeats to a full bar of the chart\'s own (non-default) time signature', () => {
+    expect(readChartQuantization({ beatsPerBar: 3 }).melodyPickupBeats).toBe(3);
+  });
+});
+
+describe('readChartBeatsPerBar', () => {
+  it('reads a saved time signature', () => {
+    expect(readChartBeatsPerBar({ beatsPerBar: 3 })).toBe(3);
+  });
+
+  it('falls back to 4/4 for a chart saved before time signature existed', () => {
+    expect(readChartBeatsPerBar({})).toBe(4);
   });
 });
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   chartFileName,
+  deleteChartFile,
   getPersistedDirectoryHandle,
   hasReadWritePermission,
   isFileSystemAccessSupported,
@@ -94,5 +95,15 @@ export function useSongLibrary() {
     [dirHandle]
   );
 
-  return { status, songs, chooseFolder, reconnectFolder, saveSong, refresh };
+  /** Permanently delete a song's file and refresh the list. No undo -- the caller confirms with the player first. */
+  const deleteSong = useCallback(
+    async (song) => {
+      if (!dirHandle) throw new Error('no songs folder chosen yet');
+      await deleteChartFile(dirHandle, song.fileName);
+      setSongs(await listSongs(dirHandle));
+    },
+    [dirHandle]
+  );
+
+  return { status, songs, chooseFolder, reconnectFolder, saveSong, deleteSong, refresh };
 }

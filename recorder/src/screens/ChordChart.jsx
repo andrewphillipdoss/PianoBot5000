@@ -7,19 +7,19 @@ import { chordBarWidthStyle, layoutChordChartRows } from '../chordChartLayout.js
  * each (see chordChartLayout.js) rather than one long row that just
  * keeps squeezing every chord narrower as a section gets longer.
  */
-export default function ChordChart({ chords, renderLabel, maxBarsPerRow, emptyMessage = 'No chords recorded', barStyle }) {
+export default function ChordChart({ chords, renderLabel, maxBarsPerRow, beatsPerBar, emptyMessage = 'No chords recorded', barStyle }) {
   if (chords.length === 0) {
     return <span style={{ color: 'var(--ink-soft)', fontSize: 14 }}>{emptyMessage}</span>;
   }
 
-  const rows = layoutChordChartRows(chords, { maxBarsPerRow });
+  const rows = layoutChordChartRows(chords, { maxBarsPerRow, beatsPerBar });
 
   return (
     <div className="chord-chart-rows">
       {rows.map((row, rowIndex) => (
         <div key={rowIndex} className="chord-bar-row">
           {row.map((chord, i) => (
-            <div key={i} className="chord-bar" style={{ ...chordBarWidthStyle(chord, { maxBarsPerRow }), ...barStyle }}>
+            <div key={i} className="chord-bar" style={{ ...chordBarWidthStyle(chord, { maxBarsPerRow, beatsPerBar }), ...barStyle }}>
               {renderLabel(chord)}
             </div>
           ))}

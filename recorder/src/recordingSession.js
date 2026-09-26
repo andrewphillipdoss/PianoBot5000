@@ -22,18 +22,16 @@
  */
 
 import {
+  DEFAULT_BEATS_PER_BAR,
   DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
   DEFAULT_MELODY_QUANTIZE_STRENGTH,
   DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
-  PICKUP_BEATS,
   processChordsPass,
   processMelodyPass,
 } from './recordingPipeline.js';
 import { getAudioContext, playClickAt, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
 import { voiceChordSimple } from './theory.js';
 
-const COUNT_IN_BEATS = 4; // one bar
-const BEATS_PER_BAR = 4;
 const SCHEDULE_INTERVAL_MS = 25; // how often the lookahead loop wakes up
 const SCHEDULE_AHEAD_SECONDS = 0.15; // how far into the future it schedules audio each time it wakes
 
@@ -52,10 +50,15 @@ export class RecordingSession {
    *   quantizeBeat) -- defaults to recordingPipeline.js's softened
    *   default rather than a full snap. Not used in chords mode.
    * @param {number} [options.pickupBeats] - melody mode only: how much
-   *   lead-in to capture before the chords enter (see
-   *   recordingPipeline.js's PICKUP_BEATS) -- defaults to a full bar,
-   *   but 0 skips the pickup bar entirely for a song that never needs
-   *   one (capturing starts right on the downbeat instead).
+   *   lead-in to capture before the chords enter -- defaults to one
+   *   full bar (`beatsPerBar`), but 0 skips the pickup bar entirely for
+   *   a song that never needs one (capturing starts right on the
+   *   downbeat instead).
+   * @param {number} [options.beatsPerBar] - the song's time signature
+   *   (its numerator, treating the beat as a quarter note) -- defaults
+   *   to 4/4. Sets the count-in's length (one bar), the metronome's
+   *   accent pattern (strong on beat 1 of every bar), and the default
+   *   pickup-bar length.
    * @param {(phase: string) => void} [options.onPhaseChange]
    * @param {(isPickupBar: boolean) => void} [options.onPickupBarChange] -
    *   melody mode only, and only when `pickupBeats` > 0: fires true
@@ -70,15 +73,17 @@ export class RecordingSession {
    *   held notes -- see theory.js). Phase drops back to 'idle' so the
    *   player can just hit record again.
    */
-  constructor({ tempo, mode, subdivisionsPerBeat, quantizeStrength, pickupBeats, onPhaseChange, onPickupBarChange, onDone, onError }) {
+  constructor({ tempo, mode, subdivisionsPerBeat, quantizeStrength, pickupBeats, beatsPerBar, onPhaseChange, onPickupBarChange, onDone, onError }) {
     subdivisionsPerBeat ??= mode === 'melody' ? DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT : DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT;
     quantizeStrength ??= DEFAULT_MELODY_QUANTIZE_STRENGTH; // chords mode never uses this (processChordsPass takes no strength)
-    pickupBeats ??= PICKUP_BEATS;
+    beatsPerBar ??= DEFAULT_BEATS_PER_BAR;
+    pickupBeats ??= beatsPerBar;
     this.tempo = tempo;
     this.mode = mode;
     this.subdivisionsPerBeat = subdivisionsPerBeat;
     this.quantizeStrength = quantizeStrength;
     this.pickupBeats = pickupBeats;
+    this.beatsPerBar = beatsPerBar;
     this.secondsPerBeat = 60 / tempo;
     this.onPhaseChange = onPhaseChange ?? (() => {});
     this.onPickupBarChange = onPickupBarChange ?? (() => {});
@@ -127,7 +132,7 @@ export class RecordingSession {
 
     this._setPhase('countIn');
     this._scheduleIntervalId = setInterval(() => this._scheduleAhead(), SCHEDULE_INTERVAL_MS);
-    this._captureStartTimeoutId = setTimeout(() => this._beginCapturing(), COUNT_IN_BEATS * this.secondsPerBeat * 1000);
+    this._captureStartTimeoutId = setTimeout(() => this._beginCapturing(), this.beatsPerBar * this.secondsPerBeat * 1000);
   }
 
   _audioTimeForBeat(beatIndex) {
@@ -146,15 +151,15 @@ export class RecordingSession {
     while (this._audioTimeForBeat(this.nextScheduledBeat) < horizon) {
       const beatPosition = this.nextScheduledBeat;
       const isOffBeat = beatPosition % 1 !== 0;
-      const isCountInBeat = beatPosition < COUNT_IN_BEATS;
-      const beatWithinCapture = beatPosition - COUNT_IN_BEATS;
+      const isCountInBeat = beatPosition < this.beatsPerBar;
+      const beatWithinCapture = beatPosition - this.beatsPerBar;
 
       // Chords mode has no known end -- keep clicking until stop() cancels this loop.
       // Melody mode's length (pickup bar + section) is fixed, so stop once it's covered.
       if (!isCountInBeat && this.mode === 'melody' && beatWithinCapture >= this.pickupBeats + this.sectionLengthBeats) break;
 
       const when = this._audioTimeForBeat(beatPosition);
-      const strength = isOffBeat ? 'off' : (isCountInBeat ? beatPosition === 0 : beatWithinCapture % BEATS_PER_BAR === 0) ? 'strong' : 'weak';
+      const strength = isOffBeat ? 'off' : (isCountInBeat ? beatPosition === 0 : beatWithinCapture % this.beatsPerBar === 0) ? 'strong' : 'weak';
       playClickAt(when, strength);
 
       this.nextScheduledBeat += 0.5;
@@ -176,7 +181,7 @@ export class RecordingSession {
    */
   _scheduleChordBacking() {
     for (const chord of this.chordsToPlay) {
-      const when = this._audioTimeForBeat(COUNT_IN_BEATS + this.pickupBeats + chord.start);
+      const when = this._audioTimeForBeat(this.beatsPerBar + this.pickupBeats + chord.start);
       const durationSeconds = (chord.end - chord.start) * this.secondsPerBeat;
       const pitches = voiceChordSimple(chord.rootPitchClass, chord.quality);
       for (const pitch of pitches) {
@@ -202,7 +207,7 @@ export class RecordingSession {
     // at 32nd notes and a fast one (a single grid step can be under
     // 50ms), where that lag is enough to consistently land a note on
     // the wrong side of its intended grid line.
-    this.captureStartRealTime = this._anchorRealTime + COUNT_IN_BEATS * this.secondsPerBeat * 1000;
+    this.captureStartRealTime = this._anchorRealTime + this.beatsPerBar * this.secondsPerBeat * 1000;
     this._setPhase('capturing');
 
     // Capturing starts right here, `this.pickupBeats` before the chords
@@ -253,7 +258,7 @@ export class RecordingSession {
       result =
         this.mode === 'chords'
           ? {
-              ...processChordsPass(this.bufferedMessages, this.tempo, chordsCaptureDurationSeconds, this.subdivisionsPerBeat),
+              ...processChordsPass(this.bufferedMessages, this.tempo, chordsCaptureDurationSeconds, this.subdivisionsPerBeat, this.beatsPerBar),
               rawMessages: this.bufferedMessages,
               captureDurationSeconds: chordsCaptureDurationSeconds,
             }

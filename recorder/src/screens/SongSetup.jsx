@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import TimeSignatureSelect from './TimeSignatureSelect.jsx';
 import './shared.css';
 
 /**
@@ -16,6 +17,7 @@ export default function SongSetup({ onBack, onSubmit }) {
   const [title, setTitle] = useState('');
   const [key, setKey] = useState('C');
   const [tempo, setTempo] = useState(96);
+  const [beatsPerBar, setBeatsPerBar] = useState(4);
 
   const canSubmit = title.trim().length > 0 && key.trim().length > 0 && Number(tempo) > 0;
 
@@ -39,6 +41,7 @@ export default function SongSetup({ onBack, onSubmit }) {
           Tempo
           <input type="number" value={tempo} onChange={(e) => setTempo(e.target.value)} min="20" max="300" />
         </label>
+        <TimeSignatureSelect value={beatsPerBar} onChange={setBeatsPerBar} />
       </div>
 
       <div className="actions-row" style={{ justifyContent: 'flex-end', gap: 12 }}>
@@ -50,7 +53,7 @@ export default function SongSetup({ onBack, onSubmit }) {
         <button
           className="btn-primary"
           disabled={!canSubmit}
-          onClick={() => onSubmit({ title: title.trim(), key: key.trim(), tempo: Number(tempo) })}
+          onClick={() => onSubmit({ title: title.trim(), key: key.trim(), tempo: Number(tempo), beatsPerBar })}
         >
           Start Recording Chords &rarr;
         </button>

@@ -95,6 +95,11 @@ export default function App() {
               setEditSession({ mode: 'reRecordMelody', chartData, sectionIndex });
               setScreen('editSong');
             }}
+            onDelete={async () => {
+              await library.deleteSong(selectedSong);
+              setSelectedSong(null);
+              setScreen('songs');
+            }}
           />
         )}
 

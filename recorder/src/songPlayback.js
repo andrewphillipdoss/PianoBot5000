@@ -31,6 +31,7 @@ export async function playSong(chartData, { onDone, metronome = false } = {}) {
   await enableAudio(); // playback is itself a user gesture (the Play click) -- the right moment to unlock audio
   const audioContext = getAudioContext();
   const secondsPerBeat = 60 / chartData.tempo;
+  const beatsPerBar = chartData.beatsPerBar ?? BEATS_PER_BAR; // a chart saved before time signature existed is 4/4
   const anchorAudioTime = audioContext.currentTime + 0.05; // small safety margin so the first note isn't already in the past
 
   // A pickup note's beat is negative -- the song can start before beat
@@ -48,7 +49,7 @@ export async function playSong(chartData, { onDone, metronome = false } = {}) {
     const firstClickBeat = Math.floor(startBeat * 2) / 2; // nearest half-beat at/before startBeat, so a pickup still gets clicked
     for (let beat = firstClickBeat; beat < endBeat; beat += 0.5) {
       const isOffBeat = beat % 1 !== 0;
-      const isDownbeat = ((beat % BEATS_PER_BAR) + BEATS_PER_BAR) % BEATS_PER_BAR === 0; // proper (non-negative) modulo -- beat can be negative during a pickup
+      const isDownbeat = ((beat % beatsPerBar) + beatsPerBar) % beatsPerBar === 0; // proper (non-negative) modulo -- beat can be negative during a pickup
       const strength = isOffBeat ? 'off' : isDownbeat ? 'strong' : 'weak';
       clickOscillators.push(playClickAt(audioTimeForBeat(beat), strength));
     }

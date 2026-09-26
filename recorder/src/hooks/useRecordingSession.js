@@ -9,13 +9,21 @@ import { RecordingSession } from '../recordingSession.js';
  * `subscribe()` so captured notes reach it, and call
  * `start`/`stop`/`restart` from UI.
  *
- * `tempo`/`mode`/`subdivisionsPerBeat` are only read once, at
- * construction -- this hook doesn't react to them changing later. If a
- * screen ever needs different values, remount it (e.g. a React `key`
- * keyed on those values) rather than expect this hook to pick up a
- * change.
+ * `tempo`/`mode`/`subdivisionsPerBeat`/`quantizeStrength`/`pickupBeats`/
+ * `beatsPerBar` are only read once, at construction -- this hook
+ * doesn't react to them changing later. A screen whose idle-screen
+ * controls (quantization, snap strength, pickup checkbox, tempo, time
+ * signature) can change these *after* it's already mounted -- exactly
+ * what RecordChords.jsx/RecordMelody.jsx's own idle-screen pickers
+ * invite -- MUST remount when they change (a React `key` keyed on all
+ * of them, set by the caller -- see RecordSongFlow.jsx) rather than
+ * expect this hook to pick up the change on its own. Skipping that key
+ * doesn't error; it just silently keeps using whatever was set when
+ * this screen first mounted for the actual take, while the picker
+ * itself (and the saved chart) show the new value -- a real bug this
+ * project shipped once already.
  */
-export function useRecordingSession({ tempo, mode, subdivisionsPerBeat }) {
+export function useRecordingSession({ tempo, mode, subdivisionsPerBeat, quantizeStrength, pickupBeats, beatsPerBar }) {
   const [phase, setPhase] = useState('idle');
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -32,6 +40,9 @@ export function useRecordingSession({ tempo, mode, subdivisionsPerBeat }) {
       tempo,
       mode,
       subdivisionsPerBeat,
+      quantizeStrength,
+      pickupBeats,
+      beatsPerBar,
       onPhaseChange: setPhase,
       onPickupBarChange: setIsPickupBar,
       onDone: setResult,

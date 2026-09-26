@@ -1,9 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useSongPlayback } from '../hooks/useSongPlayback.js';
-import { entrySectionLabel, mergeConsecutiveChordEntries, readChartFile, readChartQuantization, requantizeChartData, writeChartToHandle } from '../songStorage.js';
+import {
+  entrySectionLabel,
+  mergeConsecutiveChordEntries,
+  readChartBeatsPerBar,
+  readChartFile,
+  readChartQuantization,
+  requantizeChartData,
+  writeChartToHandle,
+} from '../songStorage.js';
 import ChordChart from './ChordChart.jsx';
 import MelodyRoll from './MelodyRoll.jsx';
 import QuantizationSelect from './QuantizationSelect.jsx';
+import TimeSignatureSelect from './TimeSignatureSelect.jsx';
 import './shared.css';
 
 /**
@@ -14,12 +23,27 @@ import './shared.css';
  * a simple melody piano-roll -- real lead-sheet notation rendering is
  * a deliberately separate, later piece; see the README.
  */
-export default function SongView({ song, onBack, onAddSection, onReRecordChords, onReRecordMelody }) {
+export default function SongView({ song, onBack, onAddSection, onReRecordChords, onReRecordMelody, onDelete }) {
   const [chartData, setChartData] = useState(null);
   const [error, setError] = useState(null);
   const [metronome, setMetronome] = useState(false); // off by default -- this is "hear the song," not a take; on by request, e.g. to follow along precisely
   const [tempoInput, setTempoInput] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const { isPlaying, play, stop } = useSongPlayback();
+
+  // Permanent, no undo -- a native confirm() is a deliberately hard-to-
+  // misclick extra step, not just a styled button, for a destructive
+  // action this app has no way to reverse.
+  async function handleDelete() {
+    if (!window.confirm(`Delete "${chartData.title}"? This can't be undone.`)) return;
+    setDeleting(true);
+    try {
+      await onDelete();
+    } catch (err) {
+      setDeleting(false);
+      setError(err);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +90,20 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
       return;
     }
     const updated = { ...chartData, tempo: value };
+    setChartData(updated);
+    try {
+      await writeChartToHandle(song.fileHandle, updated);
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  // Same reasoning as tempo -- section start/end beats are already
+  // fixed, so this only changes how many "bars" they're displayed as
+  // and the count-in/pickup-bar length for any future recording in
+  // this song, never the already-saved chord/melody positions.
+  async function handleBeatsPerBarChange(value) {
+    const updated = { ...chartData, beatsPerBar: value };
     setChartData(updated);
     try {
       await writeChartToHandle(song.fileHandle, updated);
@@ -129,6 +167,7 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
               <span className="label">Sections</span>
               <span className="value">{chartData.sections.length}</span>
             </div>
+            <TimeSignatureSelect value={readChartBeatsPerBar(chartData)} onChange={handleBeatsPerBarChange} />
             <QuantizationSelect
               label="Chords quantization"
               value={readChartQuantization(chartData).chordsQuantization}
@@ -142,24 +181,35 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
           </div>
 
           {chartData.sections.map((section, index) => {
+            const beatsPerBar = readChartBeatsPerBar(chartData);
             const sectionChords = mergeConsecutiveChordEntries(
               chartData.chords.filter((c) => entrySectionLabel(c, chartData.sections) === section.label)
             );
-            const sectionMelody = chartData.melody.filter((n) => entrySectionLabel(n, chartData.sections) === section.label);
-            const bars = (section.end_beat - section.start_beat) / 4;
+            // Rebased to section-relative beats -- every entry's `beat` is
+            // on the chart's one shared *global* timeline (see
+            // appendSectionData), but MelodyRoll expects beats relative
+            // to this section's own downbeat (0 = this section's start,
+            // negative = its own pickup notes). Section A's start_beat
+            // happens to be 0, which is exactly why this only ever broke
+            // visibly for a later section -- global and section-relative
+            // coordinates are identical there by coincidence.
+            const sectionMelody = chartData.melody
+              .filter((n) => entrySectionLabel(n, chartData.sections) === section.label)
+              .map((n) => ({ ...n, beat: n.beat - section.start_beat }));
+            const bars = (section.end_beat - section.start_beat) / beatsPerBar;
 
             return (
               <div key={section.label} style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
                 <div className="panel">
                   <span className="panel-label">Section {section.label} &mdash; {bars} bars</span>
-                  <ChordChart chords={sectionChords} renderLabel={(c) => c.chord} />
+                  <ChordChart chords={sectionChords} renderLabel={(c) => c.chord} beatsPerBar={beatsPerBar} />
                 </div>
 
                 <div className="panel">
                   <span className="panel-label">
                     Section {section.label} melody &mdash; {sectionMelody.length} note{sectionMelody.length === 1 ? '' : 's'}
                   </span>
-                  <MelodyRoll notes={sectionMelody} sectionLengthBeats={section.end_beat - section.start_beat} />
+                  <MelodyRoll notes={sectionMelody} sectionLengthBeats={section.end_beat - section.start_beat} beatsPerBar={beatsPerBar} />
                 </div>
 
                 <div className="actions-row" style={{ justifyContent: 'flex-start', gap: 10 }}>
@@ -170,8 +220,11 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
             );
           })}
 
-          <div className="actions-row" style={{ justifyContent: 'flex-start' }}>
+          <div className="actions-row">
             <button className="btn-primary" onClick={() => onAddSection(chartData)}>+ Add Section</button>
+            <button className="btn-ghost" style={{ color: 'var(--live)', borderColor: 'var(--live)' }} onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'Deleting...' : 'Delete Song'}
+            </button>
           </div>
         </>
       )}

@@ -44,6 +44,7 @@ export default function SectionComplete({
   quantizeStrength,
   onQuantizeStrengthChange,
   pickupBeats,
+  beatsPerBar = 4,
   finalizeLabel = 'Finalize Song',
   onReRecordChords,
   onReRecordMelody,
@@ -51,7 +52,7 @@ export default function SectionComplete({
   onFinalize,
 }) {
   const [notes, setNotes] = useState(melodyResult.notes);
-  const bars = chordsResult.sectionLengthBeats / 4;
+  const bars = chordsResult.sectionLengthBeats / beatsPerBar;
 
   // pickupBeats itself isn't changeable here -- it's whatever was
   // actually used for this real take (see RecordMelody.jsx), not
@@ -95,7 +96,7 @@ export default function SectionComplete({
 
       <div className="panel">
         <span className="panel-label">Chord chart</span>
-        <ChordChart chords={chordsResult.chords} renderLabel={(chord) => formatChordSymbol(chord.rootPitchClass, chord.quality)} />
+        <ChordChart chords={chordsResult.chords} renderLabel={(chord) => formatChordSymbol(chord.rootPitchClass, chord.quality)} beatsPerBar={beatsPerBar} />
       </div>
 
       <div className="panel">

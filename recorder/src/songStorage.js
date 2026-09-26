@@ -137,22 +137,27 @@ export function buildChartData({ title, key, tempo, chordsQuantization, melodyQu
  * end_beat) range, widened at the bottom by one pickup bar so a
  * pickup note (which lands *before* its own section's start_beat --
  * see appendSectionData) is still attributed to the section it was
- * actually played into rather than the one before it.
+ * actually played into rather than the one before it. Chords have no
+ * such pickup concept (only a melody pass has a pickup bar), so a
+ * chord's range is never widened -- widening it too would misattribute
+ * a chord genuinely in section i-1's own last bar to section i instead,
+ * since a chord entry has no tag to fall back *from* in an older chart.
  *
  * That widened-range fallback is genuinely ambiguous right at the
- * boundary -- a real pickup note for section i and a legitimate tail
- * note of section i-1 can occupy the exact same beat, indistinguishable
- * by position alone. Checked latest-section-first so a boundary note
- * resolves to being *someone's* pickup (the more common case for a
- * note landing in that narrow window) rather than the earlier
- * section's tail; this only matters for legacy untagged data, which is
- * exactly why new charts don't rely on it.
+ * boundary for melody -- a real pickup note for section i and a
+ * legitimate tail note of section i-1 can occupy the exact same beat,
+ * indistinguishable by position alone. Checked latest-section-first so
+ * a boundary note resolves to being *someone's* pickup (the more common
+ * case for a note landing in that narrow window) rather than the
+ * earlier section's tail; this only matters for legacy untagged data,
+ * which is exactly why new charts don't rely on it.
  */
 export function entrySectionLabel(entry, sections) {
   if (entry.section != null) return entry.section;
+  const lowerBoundWidening = 'pitch' in entry ? PICKUP_BEATS : 0; // melody entries have a pitch; chord entries don't
   for (let i = sections.length - 1; i >= 0; i--) {
     const section = sections[i];
-    if (entry.beat >= section.start_beat - PICKUP_BEATS && entry.beat < section.end_beat) return section.label;
+    if (entry.beat >= section.start_beat - lowerBoundWidening && entry.beat < section.end_beat) return section.label;
   }
   return sections.at(-1)?.label ?? null;
 }

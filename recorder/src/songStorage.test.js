@@ -191,15 +191,26 @@ describe('entrySectionLabel', () => {
 
   it('uses the entry\'s own tag when present, regardless of its beat', () => {
     expect(entrySectionLabel({ beat: 14, section: 'B' }, sections)).toBe('B');
+    expect(entrySectionLabel({ beat: 14, pitch: 60, section: 'B' }, sections)).toBe('B');
   });
 
-  it('falls back to beat-range inference for an untagged (legacy) entry', () => {
-    expect(entrySectionLabel({ beat: 8 }, sections)).toBe('A');
-    expect(entrySectionLabel({ beat: 20 }, sections)).toBe('B');
+  it('falls back to exact beat-range inference for an untagged (legacy) chord entry -- never widened, chords have no pickup concept', () => {
+    expect(entrySectionLabel({ beat: 8, chord: 'C' }, sections)).toBe('A');
+    expect(entrySectionLabel({ beat: 20, chord: 'G' }, sections)).toBe('B');
+    // Regression: a chord genuinely in A's own last bar must stay A's,
+    // not get pulled into B just because it's within one pickup-bar's
+    // width of B's start -- that widening only ever applied to melody.
+    expect(entrySectionLabel({ beat: 14, chord: 'C' }, sections)).toBe('A');
+    expect(entrySectionLabel({ beat: 15.5, chord: 'C' }, sections)).toBe('A');
   });
 
-  it('resolves an ambiguous boundary beat (within one pickup bar of the earlier section\'s end) to the later section', () => {
-    expect(entrySectionLabel({ beat: 14 }, sections)).toBe('B'); // no tag -- genuinely ambiguous, resolved as B's pickup
+  it('falls back to widened beat-range inference for an untagged (legacy) melody entry', () => {
+    expect(entrySectionLabel({ beat: 8, pitch: 60 }, sections)).toBe('A');
+    expect(entrySectionLabel({ beat: 20, pitch: 60 }, sections)).toBe('B');
+  });
+
+  it('resolves an ambiguous melody boundary beat (within one pickup bar of the earlier section\'s end) to the later section', () => {
+    expect(entrySectionLabel({ beat: 14, pitch: 60 }, sections)).toBe('B'); // no tag -- genuinely ambiguous, resolved as B's pickup
   });
 });
 

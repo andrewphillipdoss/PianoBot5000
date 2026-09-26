@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useSongPlayback } from '../hooks/useSongPlayback.js';
-import { PICKUP_BEATS } from '../recordingPipeline.js';
-import { mergeConsecutiveChordEntries, readChartFile } from '../songStorage.js';
+import { entrySectionLabel, mergeConsecutiveChordEntries, readChartFile, readChartQuantization, requantizeChartData, writeChartToHandle } from '../songStorage.js';
+import ChordChart from './ChordChart.jsx';
 import MelodyRoll from './MelodyRoll.jsx';
+import QuantizationSelect from './QuantizationSelect.jsx';
 import './shared.css';
 
 /**
@@ -33,6 +34,21 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
       cancelled = true;
     };
   }, [song]);
+
+  // No raw MIDI is kept once a song is saved, so changing quantization
+  // here can only re-snap the already-quantized beats/durations already
+  // on disk (requantizeChartData) -- there's nothing to re-derive from.
+  // Saved straight back to the exact file this song was opened from,
+  // same as any other edit made from this screen.
+  async function handleQuantizationChange(partial) {
+    const requantized = requantizeChartData(chartData, { ...readChartQuantization(chartData), ...partial });
+    setChartData(requantized);
+    try {
+      await writeChartToHandle(song.fileHandle, requantized);
+    } catch (err) {
+      setError(err);
+    }
+  }
 
   return (
     <div className="screen">
@@ -71,35 +87,30 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
               <span className="label">Sections</span>
               <span className="value">{chartData.sections.length}</span>
             </div>
+            <QuantizationSelect
+              label="Chords quantization"
+              value={readChartQuantization(chartData).chordsQuantization}
+              onChange={(value) => handleQuantizationChange({ chordsQuantization: value })}
+            />
+            <QuantizationSelect
+              label="Melody quantization"
+              value={readChartQuantization(chartData).melodyQuantization}
+              onChange={(value) => handleQuantizationChange({ melodyQuantization: value })}
+            />
           </div>
 
           {chartData.sections.map((section, index) => {
-            const isLastSection = index === chartData.sections.length - 1;
             const sectionChords = mergeConsecutiveChordEntries(
-              chartData.chords.filter((c) => c.beat >= section.start_beat && c.beat < section.end_beat)
+              chartData.chords.filter((c) => entrySectionLabel(c, chartData.sections) === section.label)
             );
-            // A pickup note's beat is negative (before the section's
-            // own downbeat at start_beat) -- widen the lower bound by
-            // one pickup bar so those notes are still included here,
-            // not silently excluded just for landing before beat 0.
-            const sectionMelody = chartData.melody.filter(
-              (n) => n.beat >= section.start_beat - PICKUP_BEATS && n.beat < section.end_beat
-            );
+            const sectionMelody = chartData.melody.filter((n) => entrySectionLabel(n, chartData.sections) === section.label);
             const bars = (section.end_beat - section.start_beat) / 4;
 
             return (
               <div key={section.label} style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
                 <div className="panel">
                   <span className="panel-label">Section {section.label} &mdash; {bars} bars</span>
-                  <div className="chord-bar-row">
-                    {sectionChords.length === 0 ? (
-                      <span style={{ color: 'var(--ink-soft)', fontSize: 14 }}>No chords recorded</span>
-                    ) : (
-                      sectionChords.map((c, i) => (
-                        <div key={i} className="chord-bar" style={{ flexGrow: c.duration_beats }}>{c.chord}</div>
-                      ))
-                    )}
-                  </div>
+                  <ChordChart chords={sectionChords} renderLabel={(c) => c.chord} />
                 </div>
 
                 <div className="panel">
@@ -109,16 +120,10 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
                   <MelodyRoll notes={sectionMelody} sectionLengthBeats={section.end_beat - section.start_beat} />
                 </div>
 
-                {isLastSection ? (
-                  <div className="actions-row" style={{ justifyContent: 'flex-start', gap: 10 }}>
-                    <button className="btn-ghost" onClick={() => onReRecordChords(chartData)}>Re-record Chords</button>
-                    <button className="btn-ghost" onClick={() => onReRecordMelody(chartData)}>Re-record Melody</button>
-                  </div>
-                ) : (
-                  chartData.sections.length > 1 && (
-                    <span style={{ fontSize: 12, color: 'var(--ink-soft)' }}>Only the last section can be re-recorded for now.</span>
-                  )
-                )}
+                <div className="actions-row" style={{ justifyContent: 'flex-start', gap: 10 }}>
+                  <button className="btn-ghost" onClick={() => onReRecordChords(chartData, index)}>Re-record Chords</button>
+                  <button className="btn-ghost" onClick={() => onReRecordMelody(chartData, index)}>Re-record Melody</button>
+                </div>
               </div>
             );
           })}

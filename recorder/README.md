@@ -21,10 +21,16 @@ change since:
 2. **Add a Song** -- title/key/tempo, once per song. Quantization (8th/
    16th/32nd notes) lives on the record screens themselves instead (see
    below) -- chords default to 8th notes, melody to 16th, and both are
-   changeable there in every mode, re-record included.
+   changeable there in every mode, re-record included -- and again from
+   an already-saved song's Song view (see below), which re-snaps the
+   already-recorded chart to the new grid since there's no raw MIDI
+   left to re-derive from at that point.
 3. **Record Chords** -- Space (or click) starts a count-in, then records;
    Space again stops. Live feedback: held notes + the detected chord
-   (triads and 7th chords -- dom7/maj7/min7/m7b5/dim7/minMaj7).
+   (triads and 7th chords -- dom7/maj7/min7/m7b5/dim7/minMaj7). The
+   metronome clicks the beat (strong on the downbeat) plus a much
+   quieter eighth-note subdivision in between, so the off-the-beat feel
+   is easier to place while playing.
 4. **Chords review** -- the detected chord chart, section length
    auto-computed (trailing dead air trimmed, rounded to the nearest 4
    bars), adjustable by a 4-bar step before proceeding. Changing the
@@ -47,22 +53,33 @@ change since:
 7. **Song view** -- click a song in My Songs to see every section's chord
    chart and a simple piano-roll of its melody (time left-to-right, pitch
    low-to-high; not real notation, see below), a Play button that plays
-   the whole song back (all sections, chords + melody together), **+ Add
-   Section** (appends a new section to this already-saved song), and
-   Re-record Chords/Melody for its *last* section (see below for why only
-   the last one).
+   the whole song back (all sections, chords + melody together), a
+   quantization picker (re-snaps the saved chart to a new grid, no
+   re-recording), **+ Add Section** (appends a new section to this
+   already-saved song), and Re-record Chords/Melody for *any* section,
+   not just the last (see below for how).
 
 **Multi-section songs lay out sequentially on one shared beat timeline**
 (section B starts exactly where A ends) -- both "add a section" entry
 points (mid-recording and from an already-saved song's Song view) go
 through the exact same append logic (`songStorage.js`'s
-`appendSectionData`). Only the *last* section can be re-recorded for now:
-an earlier one would cascade a length change through every section after
-it, and raises real ambiguity about which melody notes (a pickup note
-straddles the section boundary) belong to which section once one in the
-middle is touched -- deferred rather than risk silently misattributing or
-dropping notes, since the common case (re-record what you just did) is
-always the last section anyway.
+`appendSectionData`). Any section can be re-recorded, not just the last:
+re-recording a section in the middle shifts every later section's
+start/end by the length delta (`songStorage.js`'s `replaceSectionData`).
+That only works unambiguously because every chord/melody entry is tagged
+with the section it belongs to right when it's written (`entry.section`)
+-- otherwise a pickup note straddling a section boundary is genuinely
+indistinguishable, by beat position alone, from a legitimate tail note of
+the section before it. A chart saved before that tag existed falls back
+to inferring it from beat position instead (`entrySectionLabel`), same as
+it always effectively did.
+
+**The Chord Chart view wraps into multiple rows once a section runs
+long** -- capped at 8 bars per row (`chordChartLayout.js`) -- rather than
+one row that just squeezes every chord narrower as the section grows.
+Each chord's width is relative to a full row's capacity, not to its own
+row's total, so a 2-bar chord is always twice as wide as a 1-bar chord
+and twice as wide as a half-bar chord, consistently across every row.
 
 **Chord clustering ("were these notes struck together?") is independent
 of the quantization grid** -- it runs on raw, unquantized timing with its
@@ -104,7 +121,10 @@ src/
   songStorage.js          File System Access I/O + the on-disk chart
                           JSON shape (matches pianobot.charts.simple_format)
                           + the pure section-composition logic (build,
-                          append, replace-the-last-section)
+                          append, replace any section, re-quantize)
+  chordChartLayout.js     pure: split a section's chords into display
+                          rows capped at a max bar count each, with
+                          proportional (not per-row-relative) widths
   pianoSynth.js           the synthesized piano voice + metronome click;
                           a fully analytic, click-free envelope for
                           anything scheduled ahead of time (chord backing,

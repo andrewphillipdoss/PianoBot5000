@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useMidi } from '../hooks/MidiProvider.jsx';
 import { useRecordingSession } from '../hooks/useRecordingSession.js';
+import ChordChart from './ChordChart.jsx';
 import QuantizationSelect from './QuantizationSelect.jsx';
 import { formatChordSymbol } from '../theory.js';
 import './shared.css';
@@ -71,13 +72,11 @@ export default function RecordMelody({ title, sectionLabel, tempo, subdivisionsP
 
       <div className="panel">
         <span className="panel-label">Chords (playing back)</span>
-        <div className="chord-bar-row">
-          {chordsResult.chords.map((chord, i) => (
-            <div key={i} className="chord-bar" style={{ fontSize: 14, padding: '10px 6px', flexGrow: chord.end - chord.start }}>
-              {formatChordSymbol(chord.rootPitchClass, chord.quality)}
-            </div>
-          ))}
-        </div>
+        <ChordChart
+          chords={chordsResult.chords}
+          renderLabel={(chord) => formatChordSymbol(chord.rootPitchClass, chord.quality)}
+          barStyle={{ fontSize: 14, padding: '10px 6px' }}
+        />
       </div>
 
       <div className="record-console">

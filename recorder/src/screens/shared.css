@@ -250,14 +250,26 @@
 
 /* Chord bar grid (the "Chord Chart" view -- notation rendering is a separate, later piece) */
 
+/* One row per chordChartLayout.js row -- each already capped at maxBarsPerRow bars' worth, so this never wraps on its own. */
+.chord-chart-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .chord-bar-row {
   display: flex;
   gap: 10px;
-  flex-wrap: wrap;
 }
 
 .chord-bar {
-  flex: 1 1 60px;
+  /* Width comes from chordBarWidthStyle (a % of a full row's capacity,
+     not flexGrow) so bar width reads consistently across rows -- shrink
+     only, never grow past that. box-sizing keeps the gap/border/padding
+     from pushing a full row over 100%. */
+  flex: 0 1 auto;
+  box-sizing: border-box;
+  min-width: 32px;
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 10px;

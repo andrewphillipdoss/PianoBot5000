@@ -125,20 +125,25 @@ export class RecordingSession {
     if (!audioContext) return;
     const horizon = audioContext.currentTime + SCHEDULE_AHEAD_SECONDS;
 
+    // Visits half-beat positions (the beat itself, then its eighth-note
+    // subdivision) so the click loop can give that in-between pulse its
+    // own much-quieter 'off' click -- a subdivision guide, not a fourth
+    // accent level alongside strong/weak.
     while (this._audioTimeForBeat(this.nextScheduledBeat) < horizon) {
-      const beatIndex = this.nextScheduledBeat;
-      const isCountInBeat = beatIndex < COUNT_IN_BEATS;
-      const beatWithinCapture = beatIndex - COUNT_IN_BEATS;
+      const beatPosition = this.nextScheduledBeat;
+      const isOffBeat = beatPosition % 1 !== 0;
+      const isCountInBeat = beatPosition < COUNT_IN_BEATS;
+      const beatWithinCapture = beatPosition - COUNT_IN_BEATS;
 
       // Chords mode has no known end -- keep clicking until stop() cancels this loop.
       // Melody mode's length (pickup bar + section) is fixed, so stop once it's covered.
       if (!isCountInBeat && this.mode === 'melody' && beatWithinCapture >= PICKUP_BEATS + this.sectionLengthBeats) break;
 
-      const when = this._audioTimeForBeat(beatIndex);
-      const strong = isCountInBeat ? beatIndex === 0 : beatWithinCapture % BEATS_PER_BAR === 0;
-      playClickAt(when, strong);
+      const when = this._audioTimeForBeat(beatPosition);
+      const strength = isOffBeat ? 'off' : (isCountInBeat ? beatPosition === 0 : beatWithinCapture % BEATS_PER_BAR === 0) ? 'strong' : 'weak';
+      playClickAt(when, strength);
 
-      this.nextScheduledBeat += 1;
+      this.nextScheduledBeat += 0.5;
     }
   }
 

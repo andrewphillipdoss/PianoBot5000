@@ -4,11 +4,12 @@ import {
   buildChartData,
   chartFileName,
   emptyChartData,
+  entrySectionLabel,
   formatRelativeTime,
   mergeConsecutiveChordEntries,
   nextSectionLabel,
   readChartQuantization,
-  replaceLastSectionData,
+  replaceSectionData,
   sectionChordsAsInternal,
   slugify,
   summarizeChart,
@@ -82,10 +83,10 @@ describe('buildChartData', () => {
       melodyQuantization: 4, // not passed above -- defaults to 16th notes
       sections: [{ label: 'A', start_beat: 0, end_beat: 16 }],
       chords: [
-        { beat: 0, duration_beats: 4, chord: 'C' },
-        { beat: 4, duration_beats: 4, chord: 'G7' },
+        { beat: 0, duration_beats: 4, chord: 'C', section: 'A' },
+        { beat: 4, duration_beats: 4, chord: 'G7', section: 'A' },
       ],
-      melody: [{ beat: 0, duration_beats: 1, pitch: 60, velocity: 90 }],
+      melody: [{ beat: 0, duration_beats: 1, pitch: 60, velocity: 90, section: 'A' }],
     });
   });
 
@@ -152,12 +153,12 @@ describe('appendSectionData', () => {
       { label: 'B', start_beat: 16, end_beat: 24 }, // starts exactly where A ends
     ]);
     expect(withB.chords).toEqual([
-      { beat: 0, duration_beats: 16, chord: 'C' },
-      { beat: 16, duration_beats: 8, chord: 'F' }, // offset onto the chart's global timeline
+      { beat: 0, duration_beats: 16, chord: 'C', section: 'A' },
+      { beat: 16, duration_beats: 8, chord: 'F', section: 'B' }, // offset onto the chart's global timeline
     ]);
     expect(withB.melody).toEqual([
-      { beat: 0, duration_beats: 1, pitch: 60, velocity: 90 },
-      { beat: 16, duration_beats: 1, pitch: 64, velocity: 80 },
+      { beat: 0, duration_beats: 1, pitch: 60, velocity: 90, section: 'A' },
+      { beat: 16, duration_beats: 1, pitch: 64, velocity: 80, section: 'B' },
     ]);
   });
 
@@ -176,7 +177,29 @@ describe('appendSectionData', () => {
     });
     // -2 + startBeat(16) = 14 -- inside A's own numeric beat range, which is
     // exactly correct: that's really when it's played, leading into B's downbeat.
-    expect(withB.melody).toEqual([{ beat: 14, duration_beats: 2, pitch: 72, velocity: 90 }]);
+    // Tagged 'B' (not 'A') despite the numeric overlap -- it really is B's
+    // pickup note, which is exactly the ambiguity the tag exists to resolve.
+    expect(withB.melody).toEqual([{ beat: 14, duration_beats: 2, pitch: 72, velocity: 90, section: 'B' }]);
+  });
+});
+
+describe('entrySectionLabel', () => {
+  const sections = [
+    { label: 'A', start_beat: 0, end_beat: 16 },
+    { label: 'B', start_beat: 16, end_beat: 24 },
+  ];
+
+  it('uses the entry\'s own tag when present, regardless of its beat', () => {
+    expect(entrySectionLabel({ beat: 14, section: 'B' }, sections)).toBe('B');
+  });
+
+  it('falls back to beat-range inference for an untagged (legacy) entry', () => {
+    expect(entrySectionLabel({ beat: 8 }, sections)).toBe('A');
+    expect(entrySectionLabel({ beat: 20 }, sections)).toBe('B');
+  });
+
+  it('resolves an ambiguous boundary beat (within one pickup bar of the earlier section\'s end) to the later section', () => {
+    expect(entrySectionLabel({ beat: 14 }, sections)).toBe('B'); // no tag -- genuinely ambiguous, resolved as B's pickup
   });
 });
 
@@ -200,8 +223,8 @@ describe('sectionChordsAsInternal', () => {
   });
 });
 
-describe('replaceLastSectionData', () => {
-  it('replaces only the last section, leaving earlier sections and their chords/melody untouched', () => {
+describe('replaceSectionData', () => {
+  function twoSectionChart() {
     let chartData = buildChartData({
       title: 'T',
       key: 'C',
@@ -217,8 +240,13 @@ describe('replaceLastSectionData', () => {
       chords: [{ rootPitchClass: 5, quality: 'maj', start: 0, end: 8 }],
       melody: [{ pitch: 64, start: 0, end: 1, velocity: 80 }],
     });
+    return chartData;
+  }
 
-    const replaced = replaceLastSectionData(chartData, {
+  it('replaces the last section, leaving earlier sections and their chords/melody untouched', () => {
+    const chartData = twoSectionChart();
+
+    const replaced = replaceSectionData(chartData, 1, {
       sectionLengthBeats: 4, // a shorter re-take this time
       chords: [{ rootPitchClass: 9, quality: 'min', start: 0, end: 4 }],
       melody: [{ pitch: 69, start: 0, end: 2, velocity: 100 }],
@@ -229,12 +257,35 @@ describe('replaceLastSectionData', () => {
       { label: 'B', start_beat: 16, end_beat: 20 }, // re-recorded, kept its own label, new length
     ]);
     expect(replaced.chords).toEqual([
-      { beat: 0, duration_beats: 16, chord: 'C' }, // A's chord, untouched
-      { beat: 16, duration_beats: 4, chord: 'Am' }, // B's new chord
+      { beat: 0, duration_beats: 16, chord: 'C', section: 'A' }, // A's chord, untouched
+      { beat: 16, duration_beats: 4, chord: 'Am', section: 'B' }, // B's new chord
     ]);
     expect(replaced.melody).toEqual([
-      { beat: 0, duration_beats: 1, pitch: 60, velocity: 90 }, // A's melody, untouched
-      { beat: 16, duration_beats: 2, pitch: 69, velocity: 100 }, // B's new melody
+      { beat: 0, duration_beats: 1, pitch: 60, velocity: 90, section: 'A' }, // A's melody, untouched
+      { beat: 16, duration_beats: 2, pitch: 69, velocity: 100, section: 'B' }, // B's new melody
+    ]);
+  });
+
+  it('replaces an earlier section, shifting every later section\'s length/beats without touching earlier ones', () => {
+    const chartData = twoSectionChart();
+
+    const replaced = replaceSectionData(chartData, 0, {
+      sectionLengthBeats: 20, // 4 beats longer than A's original 16
+      chords: [{ rootPitchClass: 9, quality: 'min', start: 0, end: 20 }],
+      melody: [{ pitch: 69, start: 0, end: 2, velocity: 100 }],
+    });
+
+    expect(replaced.sections).toEqual([
+      { label: 'A', start_beat: 0, end_beat: 20 }, // re-recorded, kept its own label, new length
+      { label: 'B', start_beat: 20, end_beat: 28 }, // pushed back by A's +4-beat delta
+    ]);
+    expect(replaced.chords).toEqual([
+      { beat: 0, duration_beats: 20, chord: 'Am', section: 'A' }, // A's new chord
+      { beat: 20, duration_beats: 8, chord: 'F', section: 'B' }, // B's original chord, shifted +4
+    ]);
+    expect(replaced.melody).toEqual([
+      { beat: 0, duration_beats: 2, pitch: 69, velocity: 100, section: 'A' }, // A's new melody
+      { beat: 20, duration_beats: 1, pitch: 64, velocity: 80, section: 'B' }, // B's original melody, shifted +4
     ]);
   });
 });

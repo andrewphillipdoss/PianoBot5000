@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { appendSectionData, emptyChartData, nextSectionLabel, readChartQuantization, replaceLastSectionData, sectionChordsAsInternal } from '../songStorage.js';
+import { appendSectionData, emptyChartData, nextSectionLabel, readChartQuantization, replaceSectionData, sectionChordsAsInternal } from '../songStorage.js';
 import ChordsReview from './ChordsReview.jsx';
 import RecordChords from './RecordChords.jsx';
 import RecordMelody from './RecordMelody.jsx';
@@ -20,19 +20,22 @@ import SongSetup from './SongSetup.jsx';
  *   addSection     - baseChartData is an already-saved song; starts
  *                     recording its next section (skips setup); builds
  *                     up from that existing chart instead of empty.
- *   reRecordChords - re-records the *last* section's chords (and,
- *                     same as this always required live, its melody
- *                     too -- a chord re-take can change the section's
- *                     length, which invalidates melody recorded
- *                     against the old one). Replaces that section in
- *                     the existing chart rather than appending.
- *   reRecordMelody - re-records just the last section's melody,
- *                     keeping its existing chords/length -- skips
- *                     straight to the melody screen.
+ *   reRecordChords - re-records `sectionIndex`'s chords (and, same as
+ *                     this always required live, its melody too -- a
+ *                     chord re-take can change the section's length,
+ *                     which invalidates melody recorded against the
+ *                     old one). Replaces that section in the existing
+ *                     chart rather than appending; every later section
+ *                     shifts to absorb any length change (see
+ *                     songStorage.js's replaceSectionData).
+ *   reRecordMelody - re-records just `sectionIndex`'s melody, keeping
+ *                     its existing chords/length -- skips straight to
+ *                     the melody screen.
  *
- * Only the *last* section can be re-recorded (see songStorage.js's
- * replaceLastSectionData for why); "addSection"/multi-section-in-one-
- * sitting have no such restriction since they only ever add on.
+ * `sectionIndex` (required in the two re-record modes) picks which
+ * section is being replaced -- any section, not just the last one; see
+ * songStorage.js's replaceSectionData/entrySectionLabel for how that's
+ * done unambiguously even for a section in the middle of the chart.
  *
  * Chords/melody quantization are tracked here (not per-song-setup --
  * see SongSetup.jsx) so they can be changed on the record screens
@@ -41,9 +44,9 @@ import SongSetup from './SongSetup.jsx';
  * recorded at (readChartQuantization tolerates an older chart's single
  * shared `quantization` field too).
  */
-export default function RecordSongFlow({ mode = 'newSong', baseChartData = null, onCancel, onSaved, saveSong }) {
+export default function RecordSongFlow({ mode = 'newSong', baseChartData = null, sectionIndex = null, onCancel, onSaved, saveSong }) {
   const isReplacing = mode === 'reRecordChords' || mode === 'reRecordMelody';
-  const lastSection = baseChartData?.sections.at(-1) ?? null;
+  const targetSection = isReplacing ? baseChartData.sections[sectionIndex] : null;
 
   const [song, setSong] = useState(() => (baseChartData ? { title: baseChartData.title, key: baseChartData.key, tempo: baseChartData.tempo } : null));
   const [{ chordsQuantization, melodyQuantization }, setQuantization] = useState(() =>
@@ -52,7 +55,7 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
   const [screen, setScreen] = useState(mode === 'newSong' ? 'setup' : mode === 'reRecordMelody' ? 'recordMelody' : 'recordChords');
   const [chordsResult, setChordsResult] = useState(() =>
     mode === 'reRecordMelody'
-      ? { chords: sectionChordsAsInternal(baseChartData, lastSection), sectionLengthBeats: lastSection.end_beat - lastSection.start_beat }
+      ? { chords: sectionChordsAsInternal(baseChartData, targetSection), sectionLengthBeats: targetSection.end_beat - targetSection.start_beat }
       : null
   );
   const [melodyResult, setMelodyResult] = useState(null);
@@ -62,18 +65,17 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
   // exactly one section and save immediately.
   const [completedSections, setCompletedSections] = useState([]);
 
-  const sectionLabel = isReplacing ? lastSection.label : nextSectionLabel((baseChartData?.sections.length ?? 0) + completedSections.length);
+  const sectionLabel = isReplacing ? targetSection.label : nextSectionLabel((baseChartData?.sections.length ?? 0) + completedSections.length);
 
   async function finalize(finalMelodyNotes) {
     const thisSection = {
-      sectionLabel,
       sectionLengthBeats: chordsResult.sectionLengthBeats,
       chords: chordsResult.chords,
       melody: finalMelodyNotes,
     };
     let chartData = isReplacing
-      ? replaceLastSectionData(baseChartData, thisSection)
-      : [...completedSections, thisSection].reduce(
+      ? replaceSectionData(baseChartData, sectionIndex, thisSection)
+      : [...completedSections, { sectionLabel, ...thisSection }].reduce(
           (acc, section) => appendSectionData(acc, section),
           baseChartData ?? emptyChartData({ title: song.title, key: song.key, tempo: song.tempo })
         );

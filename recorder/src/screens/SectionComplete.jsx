@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { processMelodyPass } from '../recordingPipeline.js';
 import { formatChordSymbol } from '../theory.js';
+import ChordChart from './ChordChart.jsx';
 import QuantizationSelect from './QuantizationSelect.jsx';
 import './shared.css';
 
@@ -65,13 +66,7 @@ export default function SectionComplete({
 
       <div className="panel">
         <span className="panel-label">Chord chart</span>
-        <div className="chord-bar-row">
-          {chordsResult.chords.map((chord, i) => (
-            <div key={i} className="chord-bar" style={{ flexGrow: chord.end - chord.start }}>
-              {formatChordSymbol(chord.rootPitchClass, chord.quality)}
-            </div>
-          ))}
-        </div>
+        <ChordChart chords={chordsResult.chords} renderLabel={(chord) => formatChordSymbol(chord.rootPitchClass, chord.quality)} />
       </div>
 
       <div className="panel">

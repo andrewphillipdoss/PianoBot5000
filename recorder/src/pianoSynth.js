@@ -37,8 +37,8 @@ const SUSTAIN_RATIO = 0.15;
 const RELEASE_SECONDS = 0.15;
 const MIN_GAIN = 0.0001; // exponentialRampToValueAtTime can't target exactly 0
 
-const CLICK_FREQUENCY = { strong: 1500, weak: 900 }; // downbeat vs. the rest
-const CLICK_GAIN = { strong: 0.25, weak: 0.15 };
+const CLICK_FREQUENCY = { strong: 1500, weak: 900, off: 700 }; // downbeat, other beats, and the eighth-note in between
+const CLICK_GAIN = { strong: 0.25, weak: 0.15, off: 0.06 }; // off-beat is deliberately much quieter -- a subtle subdivision guide, not a fourth accent level
 const CLICK_DURATION_SECONDS = 0.04;
 
 export function isAudioEnabled() {
@@ -204,15 +204,20 @@ export function stopNote(pitch, releaseSeconds = 0.15) {
   stopNoteAt(pitch, audioContext.currentTime, releaseSeconds);
 }
 
-/** One metronome tick -- `strong` (the downbeat) is a higher, slightly louder click than the rest. */
-export function playClickAt(when, strong = false) {
+/**
+ * One metronome tick. `strength` is 'strong' (the downbeat, highest/
+ * loudest), 'weak' (the beat's other main pulses), or 'off' (the
+ * eighth-note subdivision in between -- much quieter, just enough to
+ * hear the subdivision without it competing with the beat itself).
+ */
+export function playClickAt(when, strength = 'weak') {
   if (!audioContext) return;
   const osc = audioContext.createOscillator();
   osc.type = 'square';
-  osc.frequency.setValueAtTime(strong ? CLICK_FREQUENCY.strong : CLICK_FREQUENCY.weak, when);
+  osc.frequency.setValueAtTime(CLICK_FREQUENCY[strength], when);
 
   const gain = audioContext.createGain();
-  gain.gain.setValueAtTime(strong ? CLICK_GAIN.strong : CLICK_GAIN.weak, when);
+  gain.gain.setValueAtTime(CLICK_GAIN[strength], when);
   gain.gain.exponentialRampToValueAtTime(0.0001, when + CLICK_DURATION_SECONDS);
 
   osc.connect(gain);

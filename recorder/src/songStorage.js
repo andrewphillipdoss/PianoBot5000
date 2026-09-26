@@ -12,8 +12,8 @@
  * faked directory handle, not unit tested).
  */
 
-import { DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT, DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT } from './recordingPipeline.js';
-import { formatChordSymbol, parseChordSymbol } from './theory.js';
+import { DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT, DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT, PICKUP_BEATS } from './recordingPipeline.js';
+import { formatChordSymbol, parseChordSymbol, quantizeBeat } from './theory.js';
 
 // ---------------------------------------------------------------------------
 // Pure: filenames, the chart JSON shape, relative-time formatting.
@@ -87,6 +87,13 @@ export function nextSectionLabel(existingSectionCount) {
  * PICKUP_BEATS) -- offsetting it the same way as every other note
  * correctly lands it in the tail of whatever came right before this
  * section, which is really where and when it's played.
+ *
+ * Every entry is tagged with the section it belongs to (`section:
+ * sectionLabel`) directly, rather than leaving that to be inferred
+ * later from its beat position -- see `entrySectionLabel` for why that
+ * inference is genuinely ambiguous right at a section boundary, which
+ * is exactly what this tag exists to avoid for anything recorded from
+ * here on.
  */
 export function appendSectionData(chartData, { sectionLabel, sectionLengthBeats, chords, melody }) {
   const startBeat = chartData.sections.length === 0 ? 0 : chartData.sections.at(-1).end_beat;
@@ -99,6 +106,7 @@ export function appendSectionData(chartData, { sectionLabel, sectionLengthBeats,
         beat: c.start + startBeat,
         duration_beats: c.end - c.start,
         chord: formatChordSymbol(c.rootPitchClass, c.quality),
+        section: sectionLabel,
       })),
     ],
     melody: [
@@ -108,6 +116,7 @@ export function appendSectionData(chartData, { sectionLabel, sectionLengthBeats,
         duration_beats: n.end - n.start,
         pitch: n.pitch,
         velocity: n.velocity,
+        section: sectionLabel,
       })),
     ],
   };
@@ -116,6 +125,36 @@ export function appendSectionData(chartData, { sectionLabel, sectionLengthBeats,
 /** Build the chart JSON object for a brand new, single-section song -- `emptyChartData` + `appendSectionData` in one call. */
 export function buildChartData({ title, key, tempo, chordsQuantization, melodyQuantization, sectionLabel, sectionLengthBeats, chords, melody }) {
   return appendSectionData(emptyChartData({ title, key, tempo, chordsQuantization, melodyQuantization }), { sectionLabel, sectionLengthBeats, chords, melody });
+}
+
+/**
+ * Which section (by label) an on-disk chord/melody entry belongs to.
+ * A chart saved by this app now tags every entry directly (`entry.
+ * section`, written by `appendSectionData`/`replaceSectionData`), so
+ * this is unambiguous for anything recorded going forward. A chart
+ * saved before that tag existed falls back to inferring it from the
+ * entry's beat position against each section's own [start_beat,
+ * end_beat) range, widened at the bottom by one pickup bar so a
+ * pickup note (which lands *before* its own section's start_beat --
+ * see appendSectionData) is still attributed to the section it was
+ * actually played into rather than the one before it.
+ *
+ * That widened-range fallback is genuinely ambiguous right at the
+ * boundary -- a real pickup note for section i and a legitimate tail
+ * note of section i-1 can occupy the exact same beat, indistinguishable
+ * by position alone. Checked latest-section-first so a boundary note
+ * resolves to being *someone's* pickup (the more common case for a
+ * note landing in that narrow window) rather than the earlier
+ * section's tail; this only matters for legacy untagged data, which is
+ * exactly why new charts don't rely on it.
+ */
+export function entrySectionLabel(entry, sections) {
+  if (entry.section != null) return entry.section;
+  for (let i = sections.length - 1; i >= 0; i--) {
+    const section = sections[i];
+    if (entry.beat >= section.start_beat - PICKUP_BEATS && entry.beat < section.end_beat) return section.label;
+  }
+  return sections.at(-1)?.label ?? null;
 }
 
 /**
@@ -128,7 +167,7 @@ export function buildChartData({ title, key, tempo, chordsQuantization, melodyQu
  */
 export function sectionChordsAsInternal(chartData, section) {
   return chartData.chords
-    .filter((c) => c.beat >= section.start_beat && c.beat < section.end_beat)
+    .filter((c) => entrySectionLabel(c, chartData.sections) === section.label)
     .map((c) => {
       const parsed = parseChordSymbol(c.chord);
       return { ...parsed, start: c.beat - section.start_beat, end: c.beat + c.duration_beats - section.start_beat };
@@ -136,25 +175,100 @@ export function sectionChordsAsInternal(chartData, section) {
 }
 
 /**
- * Replace the *last* section's chords+melody+length in place --
- * re-recording it. Deliberately last-section-only: an earlier section
- * would cascade a length change through every section after it, and
- * raises real ambiguity about which melody notes (a pickup note
- * straddles the section boundary -- see appendSectionData) belong to
- * which section once one in the middle is touched. Rather than risk
- * silently misattributing or dropping notes, that's deferred; the
- * common case (re-record what you just did) is exactly what this
- * covers, since a freshly-added section is always the last one.
+ * Replace *any* section's chords+melody+length in place -- re-recording
+ * it. Every later section shifts by the length delta (both its own
+ * start_beat/end_beat and its tagged chord/melody entries' beats);
+ * every earlier section is untouched. This only works unambiguously
+ * because every entry knows which section it belongs to (see
+ * `entrySectionLabel`) -- without that tag, a length change in the
+ * middle of a chart couldn't tell a pickup note meant for the
+ * following section apart from a genuine tail note of the section
+ * being replaced.
  */
-export function replaceLastSectionData(chartData, { sectionLengthBeats, chords, melody }) {
-  const lastSection = chartData.sections.at(-1);
-  const withoutLastSection = {
+export function replaceSectionData(chartData, sectionIndex, { sectionLengthBeats, chords, melody }) {
+  const originalSections = chartData.sections;
+  const targetSection = originalSections[sectionIndex];
+  const lengthDeltaBeats = sectionLengthBeats - (targetSection.end_beat - targetSection.start_beat);
+  const labelToIndex = new Map(originalSections.map((s, i) => [s.label, i]));
+  const startBeat = targetSection.start_beat;
+
+  function orderOf(entry) {
+    return labelToIndex.get(entrySectionLabel(entry, originalSections)) ?? originalSections.length - 1;
+  }
+  // Filtering three times and concatenating in this order (rather than
+  // one pass) keeps the result in beat-ascending order, which
+  // mergeConsecutiveChordEntries relies on -- Array.filter preserves
+  // each group's original relative order, and the whole array was
+  // already beat-ascending before this replace.
+  function rebuild(entries, replaced) {
+    const before = entries.filter((e) => orderOf(e) < sectionIndex);
+    const after = entries.filter((e) => orderOf(e) > sectionIndex).map((e) => ({ ...e, beat: e.beat + lengthDeltaBeats }));
+    return [...before, ...replaced, ...after];
+  }
+
+  return {
     ...chartData,
-    sections: chartData.sections.slice(0, -1),
-    chords: chartData.chords.filter((c) => c.beat < lastSection.start_beat),
-    melody: chartData.melody.filter((n) => n.beat < lastSection.start_beat),
+    sections: originalSections.map((s, i) => {
+      if (i < sectionIndex) return s;
+      if (i === sectionIndex) return { label: s.label, start_beat: startBeat, end_beat: startBeat + sectionLengthBeats };
+      return { ...s, start_beat: s.start_beat + lengthDeltaBeats, end_beat: s.end_beat + lengthDeltaBeats };
+    }),
+    chords: rebuild(
+      chartData.chords,
+      chords.map((c) => ({
+        beat: c.start + startBeat,
+        duration_beats: c.end - c.start,
+        chord: formatChordSymbol(c.rootPitchClass, c.quality),
+        section: targetSection.label,
+      }))
+    ),
+    melody: rebuild(
+      chartData.melody,
+      melody.map((n) => ({
+        beat: n.start + startBeat,
+        duration_beats: n.end - n.start,
+        pitch: n.pitch,
+        velocity: n.velocity,
+        section: targetSection.label,
+      }))
+    ),
   };
-  return appendSectionData(withoutLastSection, { sectionLabel: lastSection.label, sectionLengthBeats, chords, melody });
+}
+
+/**
+ * Re-snap every already-saved chord/melody entry onto a new
+ * quantization grid, for a song whose raw MIDI is long gone (recording
+ * is the only point that's ever available -- see ChordsReview.jsx/
+ * SectionComplete.jsx for the from-raw-MIDI version used right after a
+ * take, while it still is). This can only ever re-round each entry's
+ * own already-quantized `beat`/`duration_beats`, never re-recognize
+ * anything -- so, same as those two screens, it can't fail, just
+ * shift boundaries to the new grid (with the same "never round a note
+ * away to nothing" guard as the recording pipeline).
+ *
+ * Beats here are global (offset by each section's own start_beat, all
+ * multiples of a full bar), not section-relative -- but that's exactly
+ * equivalent for quantization purposes, since a whole-bar offset is
+ * already on-grid at *any* subdivision.
+ */
+export function requantizeChartData(chartData, { chordsQuantization, melodyQuantization }) {
+  return {
+    ...chartData,
+    chordsQuantization,
+    melodyQuantization,
+    chords: requantizeEntries(chartData.chords, chordsQuantization),
+    melody: requantizeEntries(chartData.melody, melodyQuantization),
+  };
+}
+
+function requantizeEntries(entries, subdivisionsPerBeat) {
+  const step = 1 / subdivisionsPerBeat;
+  return entries.map((entry) => {
+    const start = quantizeBeat(entry.beat, subdivisionsPerBeat);
+    let end = quantizeBeat(entry.beat + entry.duration_beats, subdivisionsPerBeat);
+    if (end <= start) end = start + step;
+    return { ...entry, beat: start, duration_beats: end - start };
+  });
 }
 
 /**
@@ -293,10 +407,15 @@ export async function readChartFile(fileHandle) {
   return JSON.parse(await file.text());
 }
 
-export async function writeChartFile(dirHandle, fileName, chartData) {
-  const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+/** Write chart JSON straight to an already-held file handle -- e.g. re-saving a live edit (SongView.jsx's quantization change) to the exact file a song was already opened from, no directory lookup needed. */
+export async function writeChartToHandle(fileHandle, chartData) {
   const writable = await fileHandle.createWritable();
   await writable.write(JSON.stringify(chartData, null, 2));
   await writable.close();
+}
+
+export async function writeChartFile(dirHandle, fileName, chartData) {
+  const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+  await writeChartToHandle(fileHandle, chartData);
   return fileHandle;
 }

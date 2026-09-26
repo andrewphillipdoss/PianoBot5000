@@ -44,7 +44,7 @@ function LibraryOnboarding({ status, onChooseFolder, onReconnect }) {
 export default function App() {
   const [screen, setScreen] = useState('songs');
   const [selectedSong, setSelectedSong] = useState(null);
-  const [editSession, setEditSession] = useState(null); // { mode, chartData } while adding a section to / re-recording part of the currently-viewed song
+  const [editSession, setEditSession] = useState(null); // { mode, chartData, sectionIndex } while adding a section to / re-recording part of the currently-viewed song
   const library = useSongLibrary();
 
   return (
@@ -87,12 +87,12 @@ export default function App() {
               setEditSession({ mode: 'addSection', chartData });
               setScreen('editSong');
             }}
-            onReRecordChords={(chartData) => {
-              setEditSession({ mode: 'reRecordChords', chartData });
+            onReRecordChords={(chartData, sectionIndex) => {
+              setEditSession({ mode: 'reRecordChords', chartData, sectionIndex });
               setScreen('editSong');
             }}
-            onReRecordMelody={(chartData) => {
-              setEditSession({ mode: 'reRecordMelody', chartData });
+            onReRecordMelody={(chartData, sectionIndex) => {
+              setEditSession({ mode: 'reRecordMelody', chartData, sectionIndex });
               setScreen('editSong');
             }}
           />
@@ -102,6 +102,7 @@ export default function App() {
           <RecordSongFlow
             mode={editSession.mode}
             baseChartData={editSession.chartData}
+            sectionIndex={editSession.sectionIndex}
             onCancel={() => {
               setEditSession(null);
               setScreen('songView');

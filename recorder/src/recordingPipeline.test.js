@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PICKUP_BEATS, processChordsPass, processMelodyPass } from './recordingPipeline.js';
+import { DEFAULT_MELODY_QUANTIZE_STRENGTH, PICKUP_BEATS, processChordsPass, processMelodyPass } from './recordingPipeline.js';
 
 const TEMPO = 120; // 0.5 seconds per beat -- easy round numbers for test timestamps
 const SPB = 60 / TEMPO;
@@ -130,6 +130,36 @@ describe('processChordsPass', () => {
       { rootPitchClass: 5, quality: 'maj', start: 0.5, end: 1 },
     ]);
   });
+
+  it('ignores an accidentally brushed extra key instead of failing to recognize the chord', () => {
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 48, velocity: 90 }, // C3
+      { timestamp: 0, type: 'noteon', note: 52, velocity: 90 }, // E3
+      { timestamp: 0, type: 'noteon', note: 55, velocity: 90 }, // G3
+      { timestamp: 0.01 * SPB, type: 'noteon', note: 49, velocity: 90 }, // C#3 -- an accidental brush, held only 20ms
+      { timestamp: 0.02 * SPB, type: 'noteoff', note: 49, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 48, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 52, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 55, velocity: 0 },
+    ];
+    const { chords } = processChordsPass(messages, TEMPO, 4 * SPB);
+    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', start: 0, end: 4 }]);
+  });
+
+  it('ignores a barely-touched extra key (very low velocity) the same way', () => {
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 48, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 52, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 55, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 49, velocity: 2 }, // held the whole chord, but barely touched
+      { timestamp: 4 * SPB, type: 'noteoff', note: 48, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 52, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 55, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 49, velocity: 0 },
+    ];
+    const { chords } = processChordsPass(messages, TEMPO, 4 * SPB);
+    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', start: 0, end: 4 }]);
+  });
 });
 
 describe('processMelodyPass', () => {
@@ -145,7 +175,10 @@ describe('processMelodyPass', () => {
       { timestamp: (PICKUP_BEATS + 15.6) * SPB, type: 'noteon', note: 64, velocity: 90 }, // starts just before the section ends...
       { timestamp: (PICKUP_BEATS + 16.5) * SPB, type: 'noteoff', note: 64, velocity: 0 }, // ...and would otherwise run past it
     ];
-    const { notes } = processMelodyPass(messages, TEMPO, 16);
+    // Full strength (1) here -- this test is about which grid point a
+    // note snaps to, not the default softened feel (see the strength
+    // tests below), so it isolates that from the other.
+    const { notes } = processMelodyPass(messages, TEMPO, 16, undefined, 1);
 
     expect(notes[0]).toEqual({ pitch: 60, start: 0, end: 1, velocity: 90 });
     expect(notes[1].start).toBeCloseTo(15.5, 5); // 15.6 snaps to the nearest 16th-note grid point
@@ -157,7 +190,7 @@ describe('processMelodyPass', () => {
       { timestamp: (PICKUP_BEATS + 2.35) * SPB, type: 'noteon', note: 67, velocity: 90 },
       { timestamp: (PICKUP_BEATS + 3) * SPB, type: 'noteoff', note: 67, velocity: 0 },
     ];
-    const { notes } = processMelodyPass(messages, TEMPO, 16, 8); // 8 subdivisions/beat = 32nd notes
+    const { notes } = processMelodyPass(messages, TEMPO, 16, 8, 1); // 8 subdivisions/beat = 32nd notes, full strength
     // 2.35 snaps to 2.375, the nearest 1/8-beat (32nd-note) grid point --
     // with the default 16th-note grid it would instead snap to 2.25.
     expect(notes[0].start).toBeCloseTo(2.375, 5);
@@ -177,7 +210,7 @@ describe('processMelodyPass', () => {
       { timestamp: (PICKUP_BEATS + 15.9) * SPB, type: 'noteon', note: 60, velocity: 90 }, // quantizes to exactly beat 16...
       { timestamp: (PICKUP_BEATS + 17) * SPB, type: 'noteoff', note: 60, velocity: 0 }, // ...so clipping start==end==16
     ];
-    const { notes } = processMelodyPass(messages, TEMPO, 16);
+    const { notes } = processMelodyPass(messages, TEMPO, 16, undefined, 1); // full strength -- see the note on the test above
     expect(notes).toEqual([]);
   });
 
@@ -197,5 +230,52 @@ describe('processMelodyPass', () => {
     const messages = [{ timestamp: (PICKUP_BEATS - 0.5) * SPB, type: 'noteon', note: 67, velocity: 90 }];
     const { notes } = processMelodyPass(messages, TEMPO, 16);
     expect(notes).toEqual([{ pitch: 67, start: -0.5, end: 16, velocity: 90 }]);
+  });
+
+  it('defaults to a softened (not full-strength) snap, so a note off-grid stays partway there rather than landing exactly on it', () => {
+    const messages = [
+      // 2.35 beats -- nearest 16th-note grid point (default subdivision) is 2.25, 0.1 beats away.
+      { timestamp: (PICKUP_BEATS + 2.35) * SPB, type: 'noteon', note: 67, velocity: 90 },
+      { timestamp: (PICKUP_BEATS + 3) * SPB, type: 'noteoff', note: 67, velocity: 0 },
+    ];
+    const { notes } = processMelodyPass(messages, TEMPO, 16); // default subdivisions + default (softened) strength
+    expect(notes[0].start).not.toBeCloseTo(2.25, 5); // did not fully snap...
+    expect(notes[0].start).not.toBeCloseTo(2.35, 5); // ...but isn't untouched raw timing either
+    expect(notes[0].start).toBeCloseTo(2.35 + (2.25 - 2.35) * DEFAULT_MELODY_QUANTIZE_STRENGTH, 5);
+  });
+
+  it('an explicit strength of 1 reproduces a full snap; 0 leaves timing untouched', () => {
+    const messages = [
+      { timestamp: (PICKUP_BEATS + 2.35) * SPB, type: 'noteon', note: 67, velocity: 90 },
+      { timestamp: (PICKUP_BEATS + 3) * SPB, type: 'noteoff', note: 67, velocity: 0 },
+    ];
+    const full = processMelodyPass(messages, TEMPO, 16, 4, 1);
+    const none = processMelodyPass(messages, TEMPO, 16, 4, 0);
+    expect(full.notes[0].start).toBeCloseTo(2.25, 5);
+    expect(none.notes[0].start).toBeCloseTo(2.35, 5);
+  });
+
+  it('enforces a monophonic melody line -- a held note released a little late gets clipped to the next note\'s start', () => {
+    const messages = [
+      // A legato take: the first note's release lands after the second note's onset.
+      { timestamp: (PICKUP_BEATS + 0) * SPB, type: 'noteon', note: 60, velocity: 90 },
+      { timestamp: (PICKUP_BEATS + 1.1) * SPB, type: 'noteoff', note: 60, velocity: 0 }, // released 0.1 beat late
+      { timestamp: (PICKUP_BEATS + 1) * SPB, type: 'noteon', note: 64, velocity: 90 },
+      { timestamp: (PICKUP_BEATS + 2) * SPB, type: 'noteoff', note: 64, velocity: 0 },
+    ];
+    const { notes } = processMelodyPass(messages, TEMPO, 16, 4, 1); // full strength -- isolates this from the softened-snap tests above
+    expect(notes).toEqual([
+      { pitch: 60, start: 0, end: 1, velocity: 90 }, // clipped to pitch 64's start, not left overlapping it
+      { pitch: 64, start: 1, end: 2, velocity: 90 },
+    ]);
+  });
+
+  it('skips the pickup bar entirely when pickupBeats is 0 -- capturing starts right on the downbeat', () => {
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 60, velocity: 90 }, // right at the very start of capture -- no pickup bar to land in
+      { timestamp: 1 * SPB, type: 'noteoff', note: 60, velocity: 0 },
+    ];
+    const { notes } = processMelodyPass(messages, TEMPO, 16, 4, 1, 0); // pickupBeats = 0
+    expect(notes).toEqual([{ pitch: 60, start: 0, end: 1, velocity: 90 }]); // beat 0 -- not shifted negative the way a pickup note would be
   });
 });

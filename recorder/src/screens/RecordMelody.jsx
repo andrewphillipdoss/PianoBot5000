@@ -3,6 +3,8 @@ import { useMidi } from '../hooks/MidiProvider.jsx';
 import { useRecordingSession } from '../hooks/useRecordingSession.js';
 import ChordChart from './ChordChart.jsx';
 import QuantizationSelect from './QuantizationSelect.jsx';
+import QuantizeStrengthSelect from './QuantizeStrengthSelect.jsx';
+import TempoInput from './TempoInput.jsx';
 import { formatChordSymbol } from '../theory.js';
 import './shared.css';
 
@@ -14,13 +16,37 @@ import './shared.css';
  * (there's no "I'm finished early" signal to give here, since the
  * length is already fixed).
  *
- * Capturing starts with a full pickup bar before the chords enter (see
- * recordingPipeline.js's PICKUP_BEATS) -- `isPickupBar` distinguishes
- * that lead-in window from the chords actually playing, so the status
- * text can say so instead of just "recording" throughout.
+ * Capturing starts with a full pickup bar before the chords enter by
+ * default (see recordingPipeline.js's PICKUP_BEATS) -- `isPickupBar`
+ * distinguishes that lead-in window from the chords actually playing,
+ * so the status text can say so instead of just "recording" throughout.
+ * The pickup bar itself is optional (`hasPickupBar`) -- a song that
+ * never needs a lead-in can skip it, capturing starting right on the
+ * downbeat instead; `isPickupBar` then just never fires true.
  */
-export default function RecordMelody({ title, sectionLabel, tempo, subdivisionsPerBeat, onSubdivisionsPerBeatChange, chordsResult, onBack, onDone }) {
-  const { phase, result, error, isPickupBar, start, restart, handleMidiMessage } = useRecordingSession({ tempo, mode: 'melody', subdivisionsPerBeat });
+export default function RecordMelody({
+  title,
+  sectionLabel,
+  tempo,
+  onTempoChange,
+  subdivisionsPerBeat,
+  onSubdivisionsPerBeatChange,
+  quantizeStrength,
+  onQuantizeStrengthChange,
+  hasPickupBar,
+  onHasPickupBarChange,
+  pickupBeats,
+  chordsResult,
+  onBack,
+  onDone,
+}) {
+  const { phase, result, error, isPickupBar, start, restart, handleMidiMessage } = useRecordingSession({
+    tempo,
+    mode: 'melody',
+    subdivisionsPerBeat,
+    quantizeStrength,
+    pickupBeats,
+  });
   const midi = useMidi();
 
   useEffect(() => midi.subscribe(handleMidiMessage), [midi, handleMidiMessage]);
@@ -82,7 +108,13 @@ export default function RecordMelody({ title, sectionLabel, tempo, subdivisionsP
       <div className="record-console">
         {phase === 'idle' && (
           <>
+            <TempoInput value={tempo} onChange={onTempoChange} />
             <QuantizationSelect label="Melody quantization" value={subdivisionsPerBeat} onChange={onSubdivisionsPerBeatChange} />
+            <QuantizeStrengthSelect value={quantizeStrength} onChange={onQuantizeStrengthChange} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink-soft)' }}>
+              <input type="checkbox" checked={hasPickupBar} onChange={(e) => onHasPickupBarChange(e.target.checked)} />
+              Pickup measure
+            </label>
             <button
               className="record-button"
               onClick={() => start({ chords: chordsResult.chords, sectionLengthBeats: chordsResult.sectionLengthBeats })}
@@ -91,7 +123,9 @@ export default function RecordMelody({ title, sectionLabel, tempo, subdivisionsP
               <span className="record-button__glyph" />
             </button>
             <span style={{ color: 'var(--ink-soft)', fontSize: 14, textAlign: 'center' }}>
-              Press Space (or click) -- count-in, then a pickup bar for any lead-in notes, then the chords play back while you play the melody along with them
+              {hasPickupBar
+                ? 'Press Space (or click) -- count-in, then a pickup bar for any lead-in notes, then the chords play back while you play the melody along with them'
+                : 'Press Space (or click) -- count-in, then the chords play back right away while you play the melody along with them'}
             </span>
           </>
         )}

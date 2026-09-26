@@ -18,6 +18,7 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
   const [chartData, setChartData] = useState(null);
   const [error, setError] = useState(null);
   const [metronome, setMetronome] = useState(false); // off by default -- this is "hear the song," not a take; on by request, e.g. to follow along precisely
+  const [tempoInput, setTempoInput] = useState('');
   const { isPlaying, play, stop } = useSongPlayback();
 
   useEffect(() => {
@@ -26,7 +27,10 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
     setError(null);
     readChartFile(song.fileHandle)
       .then((data) => {
-        if (!cancelled) setChartData(data);
+        if (!cancelled) {
+          setChartData(data);
+          setTempoInput(String(data.tempo));
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(err);
@@ -46,6 +50,25 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
     setChartData(requantized);
     try {
       await writeChartToHandle(song.fileHandle, requantized);
+    } catch (err) {
+      setError(err);
+    }
+  }
+
+  // Tempo, unlike quantization, needs no re-derivation at all: every
+  // chord/melody beat is already stored in beats, not seconds, so
+  // changing it only changes future playback speed -- the recorded
+  // data itself is tempo-independent and untouched.
+  async function commitTempoChange() {
+    const value = Number(tempoInput);
+    if (!Number.isFinite(value) || value <= 0 || value === chartData.tempo) {
+      setTempoInput(String(chartData.tempo)); // not a valid/changed value -- revert the input rather than save garbage
+      return;
+    }
+    const updated = { ...chartData, tempo: value };
+    setChartData(updated);
+    try {
+      await writeChartToHandle(song.fileHandle, updated);
     } catch (err) {
       setError(err);
     }
@@ -88,7 +111,19 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
             </div>
             <div className="chip">
               <span className="label">Tempo</span>
-              <span className="value">{chartData.tempo} bpm</span>
+              <span className="value" style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                <input
+                  type="number"
+                  value={tempoInput}
+                  onChange={(e) => setTempoInput(e.target.value)}
+                  onBlur={commitTempoChange}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.target.blur();
+                  }}
+                  style={{ width: 52, fontSize: 18, fontWeight: 600, fontFamily: 'inherit', border: 'none', borderBottom: '1px solid var(--line)', background: 'transparent', padding: 0, color: 'inherit' }}
+                />
+                bpm
+              </span>
             </div>
             <div className="chip">
               <span className="label">Sections</span>

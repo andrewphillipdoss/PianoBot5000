@@ -81,6 +81,8 @@ describe('buildChartData', () => {
       tempo: 76,
       chordsQuantization: 2, // not passed above -- defaults to 8th notes
       melodyQuantization: 4, // not passed above -- defaults to 16th notes
+      melodyQuantizeStrength: 0.6, // not passed above -- defaults to the softened snap
+      melodyPickupBeats: 4, // not passed above -- defaults to a full pickup bar
       sections: [{ label: 'A', start_beat: 0, end_beat: 16 }],
       chords: [
         { beat: 0, duration_beats: 4, chord: 'C', section: 'A' },
@@ -108,16 +110,25 @@ describe('buildChartData', () => {
 });
 
 describe('readChartQuantization', () => {
-  it('reads separate chords/melody quantization fields', () => {
-    expect(readChartQuantization({ chordsQuantization: 2, melodyQuantization: 8 })).toEqual({
+  it('reads separate chords/melody quantization fields, plus melody\'s quantize strength and pickup length', () => {
+    expect(
+      readChartQuantization({ chordsQuantization: 2, melodyQuantization: 8, melodyQuantizeStrength: 1, melodyPickupBeats: 0 })
+    ).toEqual({
       chordsQuantization: 2,
       melodyQuantization: 8,
+      melodyQuantizeStrength: 1,
+      melodyPickupBeats: 0,
     });
   });
 
   it('falls back to a single legacy quantization field for both, then to the current defaults', () => {
-    expect(readChartQuantization({ quantization: 8 })).toEqual({ chordsQuantization: 8, melodyQuantization: 8 });
-    expect(readChartQuantization({})).toEqual({ chordsQuantization: 2, melodyQuantization: 4 });
+    expect(readChartQuantization({ quantization: 8 })).toEqual({
+      chordsQuantization: 8,
+      melodyQuantization: 8,
+      melodyQuantizeStrength: 0.6,
+      melodyPickupBeats: 4,
+    });
+    expect(readChartQuantization({})).toEqual({ chordsQuantization: 2, melodyQuantization: 4, melodyQuantizeStrength: 0.6, melodyPickupBeats: 4 });
   });
 });
 

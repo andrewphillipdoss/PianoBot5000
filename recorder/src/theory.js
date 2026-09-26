@@ -117,28 +117,68 @@ export function detectChordQuality(pitchClasses, bassPitchClass = null) {
   return matches[0];
 }
 
-/** Snap one beat value onto the nearest grid point, `subdivisionsPerBeat` steps per beat (4 = 16th-note resolution). */
-export function quantizeBeat(beat, subdivisionsPerBeat = 4) {
+/**
+ * Snap one beat value toward the nearest grid point, `subdivisionsPerBeat`
+ * steps per beat (4 = 16th-note resolution). `strength` (0-1) controls
+ * how hard: 1 (the default) is a full snap, landing exactly on the grid
+ * point, same as always; below that, the result is pulled only part of
+ * the way there, keeping some of the original timing. A full snap is a
+ * *nearest-neighbor* rule -- it has no way to tell "played a little
+ * early on purpose" apart from "played a little early because real
+ * human timing isn't a metronome," so a note sitting close to the
+ * midpoint between two grid points can snap to a "surprising" one purely
+ * because it happened to fall a few ms on the far side of that
+ * midpoint. A lower strength softens exactly that failure mode, at the
+ * cost of the result no longer landing exactly on the grid.
+ */
+export function quantizeBeat(beat, subdivisionsPerBeat = 4, strength = 1) {
   const step = 1 / subdivisionsPerBeat;
-  return Math.round(beat / step) * step;
+  const grid = Math.round(beat / step) * step;
+  return beat + (grid - beat) * strength;
 }
 
 /**
- * Snap every note's start/end (already in beats) onto the nearest
- * grid point (see `quantizeBeat`). This is deliberately light -- just
- * enough to remove hand-timing jitter, not enough to erase real
- * rhythmic intent. A note that would collapse to zero length after
+ * Snap every note's start/end (already in beats) toward the nearest
+ * grid point (see `quantizeBeat`) -- deliberately light at full
+ * strength, just enough to remove hand-timing jitter, not enough to
+ * erase real rhythmic intent; softer still at a lower `strength` (see
+ * `quantizeBeat`). A note that would collapse to zero length after
  * snapping is nudged to one grid step instead of being dropped, since
  * every captured note was a real keystroke.
  */
-export function quantizeNotes(notes, subdivisionsPerBeat = 4) {
+export function quantizeNotes(notes, subdivisionsPerBeat = 4, strength = 1) {
   const step = 1 / subdivisionsPerBeat;
   return notes.map((note) => {
-    let start = quantizeBeat(note.start, subdivisionsPerBeat);
-    let end = quantizeBeat(note.end, subdivisionsPerBeat);
+    let start = quantizeBeat(note.start, subdivisionsPerBeat, strength);
+    let end = quantizeBeat(note.end, subdivisionsPerBeat, strength);
     if (end <= start) end = start + step;
     return { ...note, start, end };
   });
+}
+
+/**
+ * Enforce a single-voice melody line: sorted by start, clip each
+ * note's end so it never runs past the start of the next one, rather
+ * than leaving two notes overlapping and audibly ringing together.
+ * Real playing (a held note released a little late, quantization
+ * rounding a boundary the "wrong" way) routinely produces exactly this
+ * overlap for a line that's melodically monophonic by intent -- this
+ * doesn't re-detect anything, it just makes the data match that
+ * intent. Only ever shortens `end`, never touches `start`, so a chain
+ * of several overlapping notes is corrected in one pass (each note's
+ * clip depends only on the next note's own, unmodified start). A note
+ * clipped down to zero length or less (e.g. two notes quantized onto
+ * the very same start) is dropped rather than kept as an inaudible
+ * sliver.
+ */
+export function clipOverlappingNotes(notes) {
+  const sorted = [...notes].sort((a, b) => a.start - b.start);
+  return sorted
+    .map((note, i) => {
+      const next = sorted[i + 1];
+      return next && note.end > next.start ? { ...note, end: next.start } : note;
+    })
+    .filter((note) => note.end > note.start);
 }
 
 /**
@@ -258,6 +298,17 @@ export function roundToBarInterval(beats, intervalBars = 4, beatsPerBar = 4) {
   return rounded === 0 ? step : rounded;
 }
 
+// Some keyboards' key contacts "bounce" -- a single physical press can
+// fire a second note-on for the same pitch a handful of milliseconds
+// after the first, with no note-off in between. Without this guard,
+// messagesToNotes reads that second note-on as "close the held note
+// right now, a new one is starting" -- creating one genuine note plus
+// a spurious near-zero-length phantom "double hit" the player never
+// actually played. No intentional fast repeated note (a trill, a fast
+// re-strike) is ever struck this close together, so a retriggering
+// note-on inside this window is dropped as noise rather than kept.
+const RETRIGGER_DEBOUNCE_SECONDS = 0.03;
+
 /**
  * Turn a chronological stream of {timestamp, type, note, velocity}
  * MIDI events (timestamps in seconds from the start of a recording
@@ -266,7 +317,9 @@ export function roundToBarInterval(beats, intervalBars = 4, beatsPerBar = 4) {
  * interchangeable MIDI conventions -- most real keyboards send the
  * latter). A note-on for a pitch that's already sounding implicitly
  * closes the previous one at the new onset, rather than crashing on a
- * stuck/duplicate note-on.
+ * stuck/duplicate note-on -- unless it arrives within
+ * RETRIGGER_DEBOUNCE_SECONDS of that note's own onset, in which case
+ * it's treated as contact bounce (see above) and ignored outright.
  *
  * `endTimestamp`, if given, closes out any note still held when the
  * stream ends -- e.g. recording stopped while a chord was still
@@ -284,6 +337,7 @@ export function messagesToNotes(messages, endTimestamp = null) {
     if (type === 'noteon' && velocity > 0) {
       if (open.has(note)) {
         const { onset, velocity: v } = open.get(note);
+        if (timestamp - onset < RETRIGGER_DEBOUNCE_SECONDS) continue; // bounce, not a real second strike -- keep the note already open
         if (timestamp > onset) notes.push({ pitch: note, start: onset, end: timestamp, velocity: v });
       }
       open.set(note, { onset: timestamp, velocity });
@@ -301,6 +355,19 @@ export function messagesToNotes(messages, endTimestamp = null) {
   }
 
   return notes.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Drop notes too brief or too soft to be a deliberately played chord
+ * tone -- an accidentally brushed adjacent key, rather than a stray
+ * note recognized *as* a note, tends to be both much shorter and much
+ * softer than a note actually meant to be held as part of a chord.
+ * Used only for chords (see recordingPipeline.js's processChordsPass):
+ * a short, soft note in a melody line is routine (a grace note, a
+ * staccato passage) and shouldn't be filtered there.
+ */
+export function dropAccidentalTouches(notes, { minDurationSeconds = 0.04, minVelocity = 10 } = {}) {
+  return notes.filter((n) => n.end - n.start >= minDurationSeconds && n.velocity >= minVelocity);
 }
 
 /** Convert raw captured notes (seconds) into beats, given the pass's tempo (BPM). */

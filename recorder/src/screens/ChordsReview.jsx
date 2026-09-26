@@ -3,6 +3,7 @@ import { processChordsPass } from '../recordingPipeline.js';
 import { formatChordSymbol } from '../theory.js';
 import ChordChart from './ChordChart.jsx';
 import QuantizationSelect from './QuantizationSelect.jsx';
+import TempoInput from './TempoInput.jsx';
 import './shared.css';
 
 const BAR_STEP_BEATS = 16; // one 4-bar unit -- the same step the auto-rounding uses
@@ -13,15 +14,18 @@ const BAR_STEP_BEATS = 16; // one 4-bar unit -- the same step the auto-rounding 
  * chance to nudge it by a 4-bar unit before the melody pass locks it
  * in (the melody plays back for exactly this many bars).
  *
- * The quantization picker here re-derives this exact take from its
- * still-available raw MIDI (chordsResult.rawMessages) at the new grid
- * -- no re-recording needed. Since clustering (which notes are one
- * chord) runs on raw timing independent of the display grid
- * (recordingPipeline.js), changing it here can only ever re-round
- * existing chords' boundaries, never break recognition -- so unlike
- * recording fresh, this can't fail.
+ * The quantization/tempo pickers here both re-derive this exact take
+ * from its still-available raw MIDI (chordsResult.rawMessages) -- no
+ * re-recording needed. Quantization can only ever re-round existing
+ * chords' boundaries (clustering runs on raw timing independent of the
+ * display grid -- see recordingPipeline.js), so it never breaks
+ * recognition. Tempo is a bigger change: `captureDurationSeconds` is a
+ * fixed real-world duration, so reinterpreting it at a different BPM
+ * recomputes *every* beat position (and the section length itself)
+ * from scratch -- correcting a wrong tempo typed at setup without
+ * re-recording, not just a rounding tweak.
  */
-export default function ChordsReview({ title, sectionLabel, tempo, keySignature, chordsResult, subdivisionsPerBeat, onSubdivisionsPerBeatChange, onReRecord, onProceed }) {
+export default function ChordsReview({ title, sectionLabel, tempo, onTempoChange, keySignature, chordsResult, subdivisionsPerBeat, onSubdivisionsPerBeatChange, onReRecord, onProceed }) {
   const [chords, setChords] = useState(chordsResult.chords);
   const [sectionLengthBeats, setSectionLengthBeats] = useState(chordsResult.sectionLengthBeats);
   const bars = sectionLengthBeats / 4;
@@ -29,6 +33,13 @@ export default function ChordsReview({ title, sectionLabel, tempo, keySignature,
   function handleQuantizationChange(newSubdivisionsPerBeat) {
     onSubdivisionsPerBeatChange(newSubdivisionsPerBeat);
     const reprocessed = processChordsPass(chordsResult.rawMessages, tempo, chordsResult.captureDurationSeconds, newSubdivisionsPerBeat);
+    setChords(reprocessed.chords);
+    setSectionLengthBeats(reprocessed.sectionLengthBeats);
+  }
+
+  function handleTempoChange(newTempo) {
+    onTempoChange(newTempo);
+    const reprocessed = processChordsPass(chordsResult.rawMessages, newTempo, chordsResult.captureDurationSeconds, subdivisionsPerBeat);
     setChords(reprocessed.chords);
     setSectionLengthBeats(reprocessed.sectionLengthBeats);
   }
@@ -58,6 +69,7 @@ export default function ChordsReview({ title, sectionLabel, tempo, keySignature,
           <span className="label">Chord changes</span>
           <span className="value">{chords.length}</span>
         </div>
+        <TempoInput value={tempo} onChange={handleTempoChange} />
         <QuantizationSelect label="Quantization" value={subdivisionsPerBeat} onChange={handleQuantizationChange} />
       </div>
 

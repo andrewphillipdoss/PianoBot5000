@@ -6,7 +6,18 @@
  * calls into this once a pass is done; it never runs mid-recording.
  */
 
-import { detectChords, mergeConsecutiveChords, messagesToNotes, quantizeBeat, quantizeNotes, roundToBarInterval, secondsToBeats, trimTrailingEmptyBars } from './theory.js';
+import {
+  clipOverlappingNotes,
+  detectChords,
+  dropAccidentalTouches,
+  mergeConsecutiveChords,
+  messagesToNotes,
+  quantizeBeat,
+  quantizeNotes,
+  roundToBarInterval,
+  secondsToBeats,
+  trimTrailingEmptyBars,
+} from './theory.js';
 
 export const BEATS_PER_BAR = 4;
 
@@ -32,6 +43,17 @@ export const PICKUP_BEATS = BEATS_PER_BAR;
 // round-trip through re-recording without silently drifting.
 export const DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT = 2;
 export const DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT = 4;
+
+// How hard melody quantization snaps to that grid (see theory.js's
+// quantizeBeat) -- full strength (1) is a strict nearest-neighbor snap,
+// which has no way to tell "played a little early on purpose" apart
+// from ordinary human timing looseness; this default softens that so a
+// real take's own feel comes through instead of being flattened onto
+// grid lines. Chords don't get this treatment (processChordsPass never
+// takes a strength) -- a chord *change* is a discrete decision already
+// made by clustering, and its boundary benefits more from landing
+// exactly on the grid (a clean chart) than from preserving hand-timing.
+export const DEFAULT_MELODY_QUANTIZE_STRENGTH = 0.6;
 
 // Whether two notes were "struck together" as one chord is a real-time
 // question -- a natural hand roll's spread doesn't change just because
@@ -63,12 +85,19 @@ const CHORD_CLUSTER_THRESHOLD_BEATS = 0.35;
  * played: dead air has no MIDI message at all, so "the last note's
  * end time" would silently throw away exactly the trailing-silence
  * information trimming needs.
+ *
+ * Notes too brief or too soft to be a deliberately played chord tone
+ * (dropAccidentalTouches) are filtered out before clustering -- an
+ * accidentally brushed adjacent key otherwise either gets folded into
+ * the chord as a wrong extra pitch class, or breaks recognition
+ * outright (detectChords throws on a cluster that doesn't form a
+ * recognized shape).
  */
 export function processChordsPass(rawMessages, tempo, captureDurationSeconds, subdivisionsPerBeat = DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT) {
   // endTimestamp = the capture boundary itself, so a chord still held
   // when stop() was pressed (the normal case) closes there instead of
   // being dropped for never getting an explicit note-off.
-  const rawNotes = secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo);
+  const rawNotes = secondsToBeats(dropAccidentalTouches(messagesToNotes(rawMessages, captureDurationSeconds)), tempo);
   const rawChords = mergeConsecutiveChords(detectChords(rawNotes, CHORD_CLUSTER_THRESHOLD_BEATS));
   // Only *now*, after clustering has already decided which notes are
   // one chord, does the display grid come in -- purely rounding each
@@ -97,14 +126,35 @@ export function processChordsPass(rawMessages, tempo, captureDurationSeconds, su
  * a pickup note comes back with a *negative* start, not clipped or
  * dropped. Anything at or past the section's own end is clipped the
  * same way a note spilling into the boundary always was.
+ *
+ * `quantizeStrength` (0-1, see theory.js's quantizeBeat) is how hard
+ * notes snap to the grid -- full strength is a strict nearest-neighbor
+ * snap, softer preserves more of the actual take's timing.
+ *
+ * `pickupBeats` defaults to PICKUP_BEATS (a full bar) but can be 0 --
+ * a song that never needs a lead-in can skip the pickup bar entirely;
+ * capturing then starts right on the downbeat, same as the chords pass.
+ *
+ * The melody is enforced monophonic (clipOverlappingNotes) right after
+ * quantizing -- a held note released a little late, or quantization
+ * rounding two notes' boundaries toward each other, routinely leaves
+ * one note's end just past the next one's start, which is two notes
+ * audibly ringing together in a line that's melodically one voice.
  */
-export function processMelodyPass(rawMessages, tempo, sectionLengthBeats, subdivisionsPerBeat = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT) {
-  const totalCaptureBeats = PICKUP_BEATS + sectionLengthBeats;
+export function processMelodyPass(
+  rawMessages,
+  tempo,
+  sectionLengthBeats,
+  subdivisionsPerBeat = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
+  quantizeStrength = DEFAULT_MELODY_QUANTIZE_STRENGTH,
+  pickupBeats = PICKUP_BEATS
+) {
+  const totalCaptureBeats = pickupBeats + sectionLengthBeats;
   // Same reasoning as processChordsPass: a melody note still held
   // when playback auto-stops should close there, not vanish.
   const captureDurationSeconds = totalCaptureBeats * (60 / tempo);
-  const notes = quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), subdivisionsPerBeat)
-    .map((n) => ({ ...n, start: n.start - PICKUP_BEATS, end: n.end - PICKUP_BEATS }))
+  const notes = clipOverlappingNotes(quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), subdivisionsPerBeat, quantizeStrength))
+    .map((n) => ({ ...n, start: n.start - pickupBeats, end: n.end - pickupBeats }))
     .filter((n) => n.start < sectionLengthBeats)
     .map((n) => ({ ...n, end: Math.min(n.end, sectionLengthBeats) }))
     // Clipping to the boundary above can turn a note that quantized

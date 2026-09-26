@@ -43,7 +43,7 @@ describe('RecordingSession (chords mode)', () => {
     session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 52, velocity: 90 }); // E3
     session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 55, velocity: 90 }); // G3
 
-    await wait(20);
+    await wait(60); // held well past dropAccidentalTouches' real-time minimum duration (40ms), not just this fake tempo's beat length
     session.stop();
 
     expect(session.phase).toBe('done');
@@ -118,7 +118,7 @@ describe('RecordingSession (chords mode)', () => {
     session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 60, velocity: 90 });
     session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 62, velocity: 90 });
 
-    await wait(20);
+    await wait(60); // held well past dropAccidentalTouches' real-time minimum duration (40ms), not just this fake tempo's beat length
     session.stop();
 
     expect(doneCalled).toBe(false);
@@ -175,6 +175,25 @@ describe('RecordingSession (melody mode)', () => {
     expect(session.isPickupBar).toBe(false);
     // Leading falses: the constructor's own _resetPassState(), plus start()'s cancel() and its own _resetPassState().
     expect(pickupBarChanges).toEqual([false, false, false, true, false]);
+  });
+
+  it('never signals a pickup bar at all when pickupBeats is 0', async () => {
+    const pickupBarChanges = [];
+    const session = new RecordingSession({
+      tempo: FAST_TEMPO,
+      mode: 'melody',
+      pickupBeats: 0,
+      onPickupBarChange: (isPickupBar) => pickupBarChanges.push(isPickupBar),
+    });
+    session.start({ chords: [], sectionLengthBeats: 20 });
+
+    await wait(80); // past the count-in -- capturing has begun
+    expect(session.phase).toBe('capturing');
+    expect(session.isPickupBar).toBe(false);
+
+    await wait(50); // well past where a pickup bar would have ended, had there been one
+    expect(session.isPickupBar).toBe(false);
+    expect(pickupBarChanges.every((v) => v === false)).toBe(true); // never once true
   });
 
   it('schedules chord backing for a fractional-beat chord, delayed by one full pickup bar', async () => {

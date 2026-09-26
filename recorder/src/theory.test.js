@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clipOverlappingNotes,
   clusterOnsets,
   detectChordQuality,
   detectChords,
+  dropAccidentalTouches,
   formatChordSymbol,
   mergeConsecutiveChords,
   messagesToNotes,
@@ -161,6 +163,87 @@ describe('quantizeNotes', () => {
     const notes = [{ pitch: 60, start: 1.01, end: 1.03, velocity: 90 }];
     const [snapped] = quantizeNotes(notes, 4);
     expect(snapped.end).toBeGreaterThan(snapped.start);
+  });
+});
+
+describe('clipOverlappingNotes', () => {
+  it('clips a note\'s end to the next note\'s start when they overlap', () => {
+    const notes = [
+      { pitch: 60, start: 0, end: 1.1 },
+      { pitch: 64, start: 1, end: 2 },
+    ];
+    expect(clipOverlappingNotes(notes)).toEqual([
+      { pitch: 60, start: 0, end: 1 },
+      { pitch: 64, start: 1, end: 2 },
+    ]);
+  });
+
+  it('leaves non-overlapping notes untouched', () => {
+    const notes = [
+      { pitch: 60, start: 0, end: 0.5 },
+      { pitch: 64, start: 1, end: 1.5 },
+    ];
+    expect(clipOverlappingNotes(notes)).toEqual(notes);
+  });
+
+  it('corrects a whole chain of overlapping notes in one pass', () => {
+    const notes = [
+      { pitch: 60, start: 0, end: 3 }, // overlaps both notes after it
+      { pitch: 64, start: 1, end: 3 }, // overlaps the note after it
+      { pitch: 67, start: 2, end: 3 },
+    ];
+    expect(clipOverlappingNotes(notes)).toEqual([
+      { pitch: 60, start: 0, end: 1 },
+      { pitch: 64, start: 1, end: 2 },
+      { pitch: 67, start: 2, end: 3 },
+    ]);
+  });
+
+  it('sorts by start first, regardless of input order', () => {
+    const notes = [
+      { pitch: 64, start: 1, end: 2 },
+      { pitch: 60, start: 0, end: 1.5 },
+    ];
+    expect(clipOverlappingNotes(notes)).toEqual([
+      { pitch: 60, start: 0, end: 1 },
+      { pitch: 64, start: 1, end: 2 },
+    ]);
+  });
+
+  it('drops a note entirely clipped away (e.g. two notes quantized onto the same start)', () => {
+    const notes = [
+      { pitch: 60, start: 0, end: 1 },
+      { pitch: 64, start: 0, end: 1 }, // same start -- clipping the first against it would zero it out
+    ];
+    expect(clipOverlappingNotes(notes)).toEqual([{ pitch: 64, start: 0, end: 1 }]);
+  });
+});
+
+describe('dropAccidentalTouches', () => {
+  it('drops a note too brief to be a deliberate chord tone', () => {
+    const notes = [
+      { pitch: 60, start: 0, end: 0.5, velocity: 90 },
+      { pitch: 61, start: 0.1, end: 0.12, velocity: 90 }, // 20ms -- a brushed adjacent key
+    ];
+    expect(dropAccidentalTouches(notes)).toEqual([notes[0]]);
+  });
+
+  it('drops a note too soft to be a deliberate chord tone', () => {
+    const notes = [
+      { pitch: 60, start: 0, end: 0.5, velocity: 90 },
+      { pitch: 61, start: 0.1, end: 0.5, velocity: 3 }, // held long enough, but barely touched
+    ];
+    expect(dropAccidentalTouches(notes)).toEqual([notes[0]]);
+  });
+
+  it('keeps a normally played, held note', () => {
+    const notes = [{ pitch: 60, start: 0, end: 0.5, velocity: 60 }];
+    expect(dropAccidentalTouches(notes)).toEqual(notes);
+  });
+
+  it('thresholds are configurable', () => {
+    const notes = [{ pitch: 60, start: 0, end: 0.02, velocity: 5 }];
+    expect(dropAccidentalTouches(notes, { minDurationSeconds: 0.01, minVelocity: 1 })).toEqual(notes);
   });
 });
 
@@ -343,6 +426,32 @@ describe('messagesToNotes', () => {
   it('ignores an unmatched noteoff', () => {
     const messages = [{ timestamp: 0.5, type: 'noteoff', note: 60, velocity: 0 }];
     expect(messagesToNotes(messages)).toEqual([]);
+  });
+
+  it('debounces a same-pitch retrigger with no noteoff in between when it arrives within the bounce window', () => {
+    // Regression test: some keyboards' key contacts "bounce," firing a
+    // second note-on for the same pitch a few ms after the first with
+    // no note-off between them -- previously read as "close the held
+    // note, a new one is starting," producing one real note plus a
+    // spurious near-zero-length phantom the player never played.
+    const messages = [
+      { timestamp: 0.0, type: 'noteon', note: 60, velocity: 90 },
+      { timestamp: 0.01, type: 'noteon', note: 60, velocity: 85 }, // 10ms later -- contact bounce, not a real re-strike
+      { timestamp: 0.5, type: 'noteoff', note: 60, velocity: 0 },
+    ];
+    expect(messagesToNotes(messages)).toEqual([{ pitch: 60, start: 0.0, end: 0.5, velocity: 90 }]);
+  });
+
+  it('still registers a deliberate fast re-strike outside the bounce window', () => {
+    const messages = [
+      { timestamp: 0.0, type: 'noteon', note: 60, velocity: 90 },
+      { timestamp: 0.1, type: 'noteon', note: 60, velocity: 70 }, // 100ms later -- a real, if fast, re-strike
+      { timestamp: 0.2, type: 'noteoff', note: 60, velocity: 0 },
+    ];
+    expect(messagesToNotes(messages)).toEqual([
+      { pitch: 60, start: 0.0, end: 0.1, velocity: 90 },
+      { pitch: 60, start: 0.1, end: 0.2, velocity: 70 },
+    ]);
   });
 });
 

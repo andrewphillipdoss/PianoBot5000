@@ -12,7 +12,7 @@
  * faked directory handle, not unit tested).
  */
 
-import { DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT, DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT, PICKUP_BEATS } from './recordingPipeline.js';
+import { DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT, DEFAULT_MELODY_QUANTIZE_STRENGTH, DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT, PICKUP_BEATS } from './recordingPipeline.js';
 import { formatChordSymbol, parseChordSymbol, quantizeBeat } from './theory.js';
 
 // ---------------------------------------------------------------------------
@@ -37,12 +37,16 @@ export function chartFileName(title) {
  * song is built up from by appending sections onto it one at a time
  * (see `appendSectionData`).
  *
- * `chordsQuantization`/`melodyQuantization` (subdivisions/beat -- see
- * recordingPipeline.js) aren't part of the legacy CLI's own chart
- * format, but the legacy reader ignores unknown top-level keys, so
- * they round-trip harmlessly here: re-recording an already-saved song
- * reads them back out and keeps using the same grid it was originally
- * recorded at, rather than silently resetting to the default.
+ * `chordsQuantization`/`melodyQuantization` (subdivisions/beat),
+ * `melodyQuantizeStrength` (how hard melody notes snap to that grid),
+ * and `melodyPickupBeats` (how much lead-in melody capture gives a
+ * pickup note before the chords enter -- 0 skips the pickup bar
+ * entirely; see recordingPipeline.js) aren't part of the legacy CLI's
+ * own chart format, but the legacy reader ignores unknown top-level
+ * keys, so they round-trip harmlessly here: re-recording an
+ * already-saved song reads them back out and keeps using the same
+ * settings it was originally recorded with, rather than silently
+ * resetting to the default.
  */
 export function emptyChartData({
   title,
@@ -50,21 +54,26 @@ export function emptyChartData({
   tempo,
   chordsQuantization = DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
   melodyQuantization = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
+  melodyQuantizeStrength = DEFAULT_MELODY_QUANTIZE_STRENGTH,
+  melodyPickupBeats = PICKUP_BEATS,
 }) {
-  return { title, key, tempo, chordsQuantization, melodyQuantization, sections: [], chords: [], melody: [] };
+  return { title, key, tempo, chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats, sections: [], chords: [], melody: [] };
 }
 
 /**
  * Read a chart's quantization settings back out, tolerating a chart
  * saved before chords/melody had separate settings (a single
- * `quantization` field, applied to both) -- falls back through that,
- * then to the current defaults, so an old file never throws or
- * silently loses its own recorded grid.
+ * `quantization` field, applied to both) or before `melodyQuantizeStrength`/
+ * `melodyPickupBeats` existed at all -- falls back through those, then
+ * to the current defaults, so an old file never throws or silently
+ * loses its own recorded settings.
  */
 export function readChartQuantization(chartData) {
   return {
     chordsQuantization: chartData.chordsQuantization ?? chartData.quantization ?? DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
     melodyQuantization: chartData.melodyQuantization ?? chartData.quantization ?? DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
+    melodyQuantizeStrength: chartData.melodyQuantizeStrength ?? DEFAULT_MELODY_QUANTIZE_STRENGTH,
+    melodyPickupBeats: chartData.melodyPickupBeats ?? PICKUP_BEATS,
   };
 }
 

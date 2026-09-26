@@ -3,6 +3,7 @@ import { processMelodyPass } from '../recordingPipeline.js';
 import { formatChordSymbol } from '../theory.js';
 import ChordChart from './ChordChart.jsx';
 import QuantizationSelect from './QuantizationSelect.jsx';
+import QuantizeStrengthSelect from './QuantizeStrengthSelect.jsx';
 import './shared.css';
 
 /**
@@ -15,10 +16,21 @@ import './shared.css';
  * there doing nothing (see RecordSongFlow.jsx for which modes omit
  * which).
  *
- * The quantization picker re-derives melody from its still-available
- * raw MIDI (melodyResult.rawMessages) at the new grid, against the
- * section's already-fixed length -- no re-recording needed, same idea
- * as ChordsReview.jsx.
+ * The quantization/snap-strength pickers re-derive melody from its
+ * still-available raw MIDI (melodyResult.rawMessages) at the new
+ * grid/strength, against the section's already-fixed length -- no
+ * re-recording needed, same idea as ChordsReview.jsx.
+ *
+ * Deliberately no tempo picker here, unlike ChordsReview.jsx: by this
+ * point both chords AND melody are already captured from the same real
+ * take, synchronized in real time. Re-deriving only one of them at a
+ * new tempo would desync the two (chords staying at the old tempo's
+ * beat positions while melody moved to the new one's); re-deriving
+ * both consistently would also need to re-check whether the chords
+ * pass's own section length still rounds the same way at the new tempo
+ * -- a bigger, riskier change than a rounding tweak. ChordsReview is
+ * the one place left to fix a wrong tempo without re-recording; past
+ * it, re-recording is the answer.
  */
 export default function SectionComplete({
   title,
@@ -29,6 +41,9 @@ export default function SectionComplete({
   melodyResult,
   subdivisionsPerBeat,
   onSubdivisionsPerBeatChange,
+  quantizeStrength,
+  onQuantizeStrengthChange,
+  pickupBeats,
   finalizeLabel = 'Finalize Song',
   onReRecordChords,
   onReRecordMelody,
@@ -38,10 +53,23 @@ export default function SectionComplete({
   const [notes, setNotes] = useState(melodyResult.notes);
   const bars = chordsResult.sectionLengthBeats / 4;
 
+  // pickupBeats itself isn't changeable here -- it's whatever was
+  // actually used for this real take (see RecordMelody.jsx), not
+  // something re-derivable from raw MIDI after the fact the way
+  // quantization/strength are.
+  function reprocess(newSubdivisionsPerBeat, newQuantizeStrength) {
+    const reprocessed = processMelodyPass(melodyResult.rawMessages, tempo, chordsResult.sectionLengthBeats, newSubdivisionsPerBeat, newQuantizeStrength, pickupBeats);
+    setNotes(reprocessed.notes);
+  }
+
   function handleQuantizationChange(newSubdivisionsPerBeat) {
     onSubdivisionsPerBeatChange(newSubdivisionsPerBeat);
-    const reprocessed = processMelodyPass(melodyResult.rawMessages, tempo, chordsResult.sectionLengthBeats, newSubdivisionsPerBeat);
-    setNotes(reprocessed.notes);
+    reprocess(newSubdivisionsPerBeat, quantizeStrength);
+  }
+
+  function handleQuantizeStrengthChange(newQuantizeStrength) {
+    onQuantizeStrengthChange(newQuantizeStrength);
+    reprocess(subdivisionsPerBeat, newQuantizeStrength);
   }
 
   return (
@@ -62,6 +90,7 @@ export default function SectionComplete({
           <span className="value" style={{ color: 'var(--good)' }}>Chords + Melody &#10003;</span>
         </div>
         <QuantizationSelect label="Melody quantization" value={subdivisionsPerBeat} onChange={handleQuantizationChange} />
+        <QuantizeStrengthSelect value={quantizeStrength} onChange={handleQuantizeStrengthChange} />
       </div>
 
       <div className="panel">

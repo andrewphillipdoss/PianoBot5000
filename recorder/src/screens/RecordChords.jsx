@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useMidi } from '../hooks/MidiProvider.jsx';
 import { useRecordingSession } from '../hooks/useRecordingSession.js';
 import QuantizationSelect from './QuantizationSelect.jsx';
+import TempoInput from './TempoInput.jsx';
 import { detectChordQuality, formatChordSymbol, midiNoteName } from '../theory.js';
 import './shared.css';
 
@@ -14,12 +15,13 @@ import './shared.css';
  * accurate and immediate, where a decorative beat visual that isn't
  * actually beat-synced would just be misleading.
  *
- * The quantization picker only shows (and is only meaningful) while
- * idle -- useRecordingSession reads subdivisionsPerBeat once, at
- * construction, so changing it mid-take wouldn't do anything; ChordsReview
- * is where an *already-captured* take gets re-quantized instead.
+ * The quantization/tempo pickers only show (and are only meaningful)
+ * while idle -- useRecordingSession reads both once, at construction,
+ * so changing either mid-take wouldn't do anything; ChordsReview is
+ * where an *already-captured* take gets re-derived at a new
+ * quantization/tempo instead.
  */
-export default function RecordChords({ title, sectionLabel, tempo, subdivisionsPerBeat, onSubdivisionsPerBeatChange, onBack, onDone }) {
+export default function RecordChords({ title, sectionLabel, tempo, onTempoChange, subdivisionsPerBeat, onSubdivisionsPerBeatChange, onBack, onDone }) {
   const { phase, result, error, start, stop, handleMidiMessage } = useRecordingSession({ tempo, mode: 'chords', subdivisionsPerBeat });
   const midi = useMidi();
 
@@ -91,6 +93,7 @@ export default function RecordChords({ title, sectionLabel, tempo, subdivisionsP
       <div className="record-console">
         {phase === 'idle' && (
           <>
+            <TempoInput value={tempo} onChange={onTempoChange} />
             <QuantizationSelect label="Chords quantization" value={subdivisionsPerBeat} onChange={onSubdivisionsPerBeatChange} />
             <button className="record-button" onClick={start} aria-label="Start recording">
               <span className="record-button__glyph" />

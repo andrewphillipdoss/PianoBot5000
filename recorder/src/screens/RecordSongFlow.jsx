@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PICKUP_BEATS } from '../recordingPipeline.js';
 import { appendSectionData, emptyChartData, nextSectionLabel, readChartQuantization, replaceSectionData, sectionChordsAsInternal } from '../songStorage.js';
 import ChordsReview from './ChordsReview.jsx';
 import RecordChords from './RecordChords.jsx';
@@ -37,19 +38,23 @@ import SongSetup from './SongSetup.jsx';
  * songStorage.js's replaceSectionData/entrySectionLabel for how that's
  * done unambiguously even for a section in the middle of the chart.
  *
- * Chords/melody quantization are tracked here (not per-song-setup --
- * see SongSetup.jsx) so they can be changed on the record screens
- * themselves and in every mode, re-record included; a chart read back
- * for addSection/re-record keeps using whatever grid it was last
- * recorded at (readChartQuantization tolerates an older chart's single
- * shared `quantization` field too).
+ * Chords/melody quantization -- and tempo -- are tracked here (not
+ * fixed at song setup, see SongSetup.jsx) so they can be changed on
+ * the record screens themselves and in every mode, re-record included;
+ * a chart read back for addSection/re-record keeps using whatever
+ * grid/tempo it was last recorded at (readChartQuantization tolerates
+ * an older chart's single shared `quantization` field too). Tempo is
+ * changeable up through ChordsReview (where it can still re-derive the
+ * chords pass from raw MIDI at the new BPM) but not past it -- see
+ * SectionComplete.jsx's docstring for why that's a deliberate boundary,
+ * not an oversight.
  */
 export default function RecordSongFlow({ mode = 'newSong', baseChartData = null, sectionIndex = null, onCancel, onSaved, saveSong }) {
   const isReplacing = mode === 'reRecordChords' || mode === 'reRecordMelody';
   const targetSection = isReplacing ? baseChartData.sections[sectionIndex] : null;
 
   const [song, setSong] = useState(() => (baseChartData ? { title: baseChartData.title, key: baseChartData.key, tempo: baseChartData.tempo } : null));
-  const [{ chordsQuantization, melodyQuantization }, setQuantization] = useState(() =>
+  const [{ chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats }, setQuantization] = useState(() =>
     baseChartData ? readChartQuantization(baseChartData) : readChartQuantization({})
   );
   const [screen, setScreen] = useState(mode === 'newSong' ? 'setup' : mode === 'reRecordMelody' ? 'recordMelody' : 'recordChords');
@@ -67,6 +72,10 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
 
   const sectionLabel = isReplacing ? targetSection.label : nextSectionLabel((baseChartData?.sections.length ?? 0) + completedSections.length);
 
+  function handleTempoChange(value) {
+    setSong((s) => ({ ...s, tempo: value }));
+  }
+
   async function finalize(finalMelodyNotes) {
     const thisSection = {
       sectionLengthBeats: chordsResult.sectionLengthBeats,
@@ -79,7 +88,7 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
           (acc, section) => appendSectionData(acc, section),
           baseChartData ?? emptyChartData({ title: song.title, key: song.key, tempo: song.tempo })
         );
-    chartData = { ...chartData, chordsQuantization, melodyQuantization }; // whatever grid was actually used for this session, even if it differs from what the chart started with
+    chartData = { ...chartData, tempo: song.tempo, chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats }; // whatever settings were actually used for this session, even if they differ from what the chart started with
     const savedSummary = await saveSong(chartData);
     onSaved(savedSummary);
   }
@@ -102,6 +111,7 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
         title={song.title}
         sectionLabel={sectionLabel}
         tempo={song.tempo}
+        onTempoChange={handleTempoChange}
         subdivisionsPerBeat={chordsQuantization}
         onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, chordsQuantization: value }))}
         onBack={mode === 'newSong' && completedSections.length === 0 ? () => setScreen('setup') : onCancel}
@@ -119,6 +129,7 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
         title={song.title}
         sectionLabel={sectionLabel}
         tempo={song.tempo}
+        onTempoChange={handleTempoChange}
         keySignature={song.key}
         chordsResult={chordsResult}
         subdivisionsPerBeat={chordsQuantization}
@@ -141,8 +152,14 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
         title={song.title}
         sectionLabel={sectionLabel}
         tempo={song.tempo}
+        onTempoChange={handleTempoChange}
         subdivisionsPerBeat={melodyQuantization}
         onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, melodyQuantization: value }))}
+        quantizeStrength={melodyQuantizeStrength}
+        onQuantizeStrengthChange={(value) => setQuantization((q) => ({ ...q, melodyQuantizeStrength: value }))}
+        hasPickupBar={melodyPickupBeats > 0}
+        onHasPickupBarChange={(checked) => setQuantization((q) => ({ ...q, melodyPickupBeats: checked ? PICKUP_BEATS : 0 }))}
+        pickupBeats={melodyPickupBeats}
         chordsResult={chordsResult}
         onBack={mode === 'reRecordMelody' ? onCancel : () => setScreen('chordsReview')}
         onDone={(result) => {
@@ -164,6 +181,9 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
       melodyResult={melodyResult}
       subdivisionsPerBeat={melodyQuantization}
       onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, melodyQuantization: value }))}
+      quantizeStrength={melodyQuantizeStrength}
+      onQuantizeStrengthChange={(value) => setQuantization((q) => ({ ...q, melodyQuantizeStrength: value }))}
+      pickupBeats={melodyPickupBeats}
       finalizeLabel={mode === 'newSong' || mode === 'addSection' ? 'Finalize Song' : 'Save Changes'}
       onReRecordChords={
         mode === 'reRecordMelody'

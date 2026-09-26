@@ -18,13 +18,15 @@ change since:
 1. **My Songs** -- lists every chart JSON file in a folder you pick once
    (remembered across reloads via IndexedDB; re-grant permission with one
    click if the browser ever forgets).
-2. **Add a Song** -- title/key/tempo, once per song. Quantization (8th/
-   16th/32nd notes) lives on the record screens themselves instead (see
-   below) -- chords default to 8th notes, melody to 16th, and both are
-   changeable there in every mode, re-record included -- and again from
-   an already-saved song's Song view (see below), which re-snaps the
-   already-recorded chart to the new grid since there's no raw MIDI
-   left to re-derive from at that point.
+2. **Add a Song** -- title/key/tempo, once per song. Quantization
+   (quarter/8th/16th/32nd notes) lives on the record screens themselves
+   instead (see below) -- chords default to 8th notes, melody to 16th,
+   and both are changeable there in every mode, re-record included --
+   and again from an already-saved song's Song view (see below), which
+   re-snaps the already-recorded chart to the new grid since there's no
+   raw MIDI left to re-derive from at that point. Quarter notes is
+   useful for chords especially -- a coarser grid than the 8th-note
+   default for a song whose chords never change faster than once a beat.
 3. **Record Chords** -- Space (or click) starts a count-in, then records;
    Space again stops. Live feedback: held notes + the detected chord
    (triads and 7th chords -- dom7/maj7/min7/m7b5/dim7/minMaj7). The
@@ -55,7 +57,9 @@ change since:
    low-to-high; not real notation, see below), a Play button that plays
    the whole song back (all sections, chords + melody together), a
    quantization picker (re-snaps the saved chart to a new grid, no
-   re-recording), **+ Add Section** (appends a new section to this
+   re-recording), an optional metronome for playback (off by default --
+   "hear the song," not a take -- on by request, e.g. to follow along
+   precisely), **+ Add Section** (appends a new section to this
    already-saved song), and Re-record Chords/Melody for *any* section,
    not just the last (see below for how).
 
@@ -90,6 +94,17 @@ belong to it. This matters at coarse grids especially: quantizing first
 grid step of rounding error was, at 8th notes, *wider than a routine
 eighth-note chord change* -- two genuinely different chords a normal half-
 beat apart would get merged into one unrecognizable cluster.
+
+**A captured note's start time is anchored to the count-in's own nominal
+schedule, not to a fresh clock read inside its setTimeout callback** --
+the fix for a real bug where notes could consistently land on the wrong
+side of a fine (32nd-note) grid line. `performance.now()` read fresh
+inside a `setTimeout` fires whenever that callback actually runs, which
+can lag the nominal boundary by tens of milliseconds under any
+main-thread contention; deriving it instead from `start()`'s own
+timestamp plus the nominal count-in duration makes it immune to that,
+and ties note timestamps to the exact same clock the audible
+click/chord-backing schedule already uses.
 
 **Deliberately out of scope for now** (see the design discussion in this
 repo's history for why): real lead-sheet notation rendering (the

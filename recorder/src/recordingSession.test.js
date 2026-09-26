@@ -57,6 +57,27 @@ describe('RecordingSession (chords mode)', () => {
     expect(session.result.captureDurationSeconds).toBeGreaterThan(0);
   });
 
+  it('anchors captureStartRealTime to the nominal count-in end, not to whenever the setTimeout callback happens to actually fire', async () => {
+    // Regression test for a real bug: reading performance.now() fresh
+    // inside the count-in's setTimeout callback means every captured
+    // note's timestamp is offset by however late that callback actually
+    // fired (ordinary setTimeout jitter, worse under any main-thread
+    // contention) -- consistently enough, at a fine grid/fast tempo, to
+    // land notes on the wrong side of their intended grid line. Anchoring
+    // to start()'s own timestamp plus the nominal count-in duration
+    // instead makes this immune to how late the callback actually runs.
+    const startedAt = performance.now();
+    const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'chords' });
+    session.start();
+    await wait(80);
+    expect(session.phase).toBe('capturing');
+
+    const COUNT_IN_BEATS = 4;
+    const secondsPerBeat = 60 / FAST_TEMPO;
+    const expectedCaptureStart = startedAt + COUNT_IN_BEATS * secondsPerBeat * 1000;
+    expect(session.captureStartRealTime).toBeCloseTo(expectedCaptureStart, 0);
+  });
+
   it('cancel() stops everything and goes back to idle', async () => {
     const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'chords' });
     session.start();

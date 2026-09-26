@@ -17,6 +17,7 @@ import './shared.css';
 export default function SongView({ song, onBack, onAddSection, onReRecordChords, onReRecordMelody }) {
   const [chartData, setChartData] = useState(null);
   const [error, setError] = useState(null);
+  const [metronome, setMetronome] = useState(false); // off by default -- this is "hear the song," not a take; on by request, e.g. to follow along precisely
   const { isPlaying, play, stop } = useSongPlayback();
 
   useEffect(() => {
@@ -58,9 +59,15 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
           <h1 style={{ fontSize: 26, marginTop: 6 }}>{chartData ? chartData.title : song.title}</h1>
         </div>
         {chartData && (
-          <button className="btn-primary" onClick={() => (isPlaying ? stop() : play(chartData))}>
-            {isPlaying ? '■ Stop' : '▶ Play'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink-soft)' }}>
+              <input type="checkbox" checked={metronome} onChange={(e) => setMetronome(e.target.checked)} disabled={isPlaying} />
+              Metronome
+            </label>
+            <button className="btn-primary" onClick={() => (isPlaying ? stop() : play(chartData, { metronome }))}>
+              {isPlaying ? '■ Stop' : '▶ Play'}
+            </button>
+          </div>
         )}
       </div>
 

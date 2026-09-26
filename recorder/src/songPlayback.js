@@ -8,7 +8,8 @@
  * starts). No count-in -- this is "hear the song," not a take.
  */
 
-import { enableAudio, getAudioContext, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
+import { BEATS_PER_BAR } from './recordingPipeline.js';
+import { enableAudio, getAudioContext, playClickAt, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
 import { parseChordSymbol, voiceChordSimple } from './theory.js';
 
 const CHORD_VELOCITY = 70;
@@ -18,10 +19,15 @@ const CHORD_VELOCITY = 70;
  * @param {object} [options]
  * @param {() => void} [options.onDone] - fires once playback reaches the
  *   end on its own; does NOT fire if the returned `stop()` cuts it short.
+ * @param {boolean} [options.metronome] - click the beat (+ its eighth-note
+ *   subdivision, same 3-tier strong/weak/off click as recording -- see
+ *   recordingSession.js) alongside the song. Optional and off by default:
+ *   this is "hear the song," not a take, so most of the time the click
+ *   would just be noise -- useful on demand for following along precisely.
  * @returns {Promise<() => void>} a `stop()` function that silences
  *   everything immediately.
  */
-export async function playSong(chartData, { onDone } = {}) {
+export async function playSong(chartData, { onDone, metronome = false } = {}) {
   await enableAudio(); // playback is itself a user gesture (the Play click) -- the right moment to unlock audio
   const audioContext = getAudioContext();
   const secondsPerBeat = 60 / chartData.tempo;
@@ -32,6 +38,21 @@ export async function playSong(chartData, { onDone } = {}) {
   const startBeat = Math.min(0, ...chartData.melody.map((n) => n.beat));
   const endBeat = Math.max(0, ...chartData.sections.map((s) => s.end_beat));
   const audioTimeForBeat = (beat) => anchorAudioTime + (beat - startBeat) * secondsPerBeat;
+
+  // Every beat's audio scheduled precisely up front here too, same
+  // reasoning as the chords/melody below: the whole song's length and
+  // timing are already fully known, so there's no need for the
+  // incremental lookahead recording's live click uses.
+  const clickOscillators = [];
+  if (metronome) {
+    const firstClickBeat = Math.floor(startBeat * 2) / 2; // nearest half-beat at/before startBeat, so a pickup still gets clicked
+    for (let beat = firstClickBeat; beat < endBeat; beat += 0.5) {
+      const isOffBeat = beat % 1 !== 0;
+      const isDownbeat = ((beat % BEATS_PER_BAR) + BEATS_PER_BAR) % BEATS_PER_BAR === 0; // proper (non-negative) modulo -- beat can be negative during a pickup
+      const strength = isOffBeat ? 'off' : isDownbeat ? 'strong' : 'weak';
+      clickOscillators.push(playClickAt(audioTimeForBeat(beat), strength));
+    }
+  }
 
   for (const chordEntry of chartData.chords) {
     const parsed = parseChordSymbol(chordEntry.chord);
@@ -56,5 +77,17 @@ export async function playSong(chartData, { onDone } = {}) {
   return function stop() {
     clearTimeout(doneTimeoutId);
     stopAllNotes();
+    // Click oscillators aren't voices stopAllNotes() knows about (see
+    // playClickAt) -- every click was already scheduled up front, so a
+    // stop() mid-song otherwise leaves every future click still firing
+    // right up to the song's original end.
+    const now = audioContext.currentTime;
+    for (const osc of clickOscillators) {
+      try {
+        osc?.stop(now);
+      } catch {
+        // Already stopped (its own scheduled click already finished) -- fine.
+      }
+    }
   };
 }

@@ -9,7 +9,7 @@ export function useSongPlayback() {
 
   useEffect(() => () => stopRef.current?.(), []); // silence playback if the screen is left mid-song
 
-  const play = useCallback(async (chartData) => {
+  const play = useCallback(async (chartData, { metronome = false } = {}) => {
     const requestId = ++requestIdRef.current;
     stopRef.current?.(); // stop whatever's already playing first
     setIsPlaying(true);
@@ -20,6 +20,7 @@ export function useSongPlayback() {
     // clobbering it and letting audio start after the player already
     // asked for it to stop.
     const stop = await playSong(chartData, {
+      metronome,
       onDone: () => {
         if (requestIdRef.current !== requestId) return;
         stopRef.current = null;

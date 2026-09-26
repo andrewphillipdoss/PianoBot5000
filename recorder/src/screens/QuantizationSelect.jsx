@@ -1,5 +1,6 @@
 // value = subdivisions/beat that theory.js's quantizeBeat/quantizeNotes expect.
 export const QUANTIZATION_OPTIONS = [
+  { value: 1, label: 'Quarter notes' },
   { value: 2, label: '8th notes' },
   { value: 4, label: '16th notes' },
   { value: 8, label: '32nd notes' },

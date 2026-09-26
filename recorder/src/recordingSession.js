@@ -174,13 +174,21 @@ export class RecordingSession {
 
   _beginCapturing() {
     if (this.phase !== 'countIn') return; // cancelled/restarted before the count-in finished
-    // Reading performance.now() fresh here (rather than deriving it
-    // from the audio-time anchor) means this boundary can be off by a
-    // few ms of setTimeout jitter -- harmless: it only shifts every
-    // captured note's reported start by that same small constant, and
-    // quantization (a 16th-note grid, ~60-100+ ms wide at any normal
-    // tempo) already absorbs far more than that.
-    this.captureStartRealTime = performance.now();
+    // Derived from the start()-time anchor rather than a fresh
+    // performance.now() read here. This boundary is exactly when the
+    // metronome/chord-backing audio schedule *nominally* reaches the
+    // end of the count-in -- the same clock a player is actually
+    // listening to and playing along with. A fresh read is instead
+    // whenever this setTimeout callback happens to actually fire,
+    // which can lag the nominal boundary by tens of milliseconds under
+    // any main-thread contention (more likely now that the metronome
+    // schedules twice as many clicks). That was previously dismissed
+    // as harmless on the assumption that a quantization grid is always
+    // tens of ms wide -- true at 16th notes and a moderate tempo, false
+    // at 32nd notes and a fast one (a single grid step can be under
+    // 50ms), where that lag is enough to consistently land a note on
+    // the wrong side of its intended grid line.
+    this.captureStartRealTime = this._anchorRealTime + COUNT_IN_BEATS * this.secondsPerBeat * 1000;
     this._setPhase('capturing');
 
     // Capturing starts right here, a full pickup bar (PICKUP_BEATS)

@@ -209,9 +209,16 @@ export function stopNote(pitch, releaseSeconds = 0.15) {
  * loudest), 'weak' (the beat's other main pulses), or 'off' (the
  * eighth-note subdivision in between -- much quieter, just enough to
  * hear the subdivision without it competing with the beat itself).
+ *
+ * Returns the oscillator node (or null if audio isn't enabled yet) --
+ * a click scheduled ahead of time (song playback's metronome, unlike
+ * recording's incremental one) needs some way to be cancelled early if
+ * playback is stopped before that click's `when` arrives; nothing else
+ * about a click needs tracking, so this is the one thing worth handing
+ * back rather than adding a whole voice-bookkeeping path for it.
  */
 export function playClickAt(when, strength = 'weak') {
-  if (!audioContext) return;
+  if (!audioContext) return null;
   const osc = audioContext.createOscillator();
   osc.type = 'square';
   osc.frequency.setValueAtTime(CLICK_FREQUENCY[strength], when);
@@ -224,4 +231,5 @@ export function playClickAt(when, strength = 'weak') {
   gain.connect(audioContext.destination);
   osc.start(when);
   osc.stop(when + CLICK_DURATION_SECONDS + 0.01);
+  return osc;
 }

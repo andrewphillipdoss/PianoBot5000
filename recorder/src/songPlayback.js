@@ -1,11 +1,13 @@
 /**
  * One-shot playback of a finished song's chart data -- chords voiced
  * the same simple way as the melody-record backing track, plus the
- * captured melody, all scheduled precisely up front against the Web
- * Audio clock (see recordingSession.js's `_scheduleChordBacking` for
- * why that's the right pattern here, not incremental lookahead: the
- * whole song and its timing are already fully known before playback
- * starts). No count-in -- this is "hear the song," not a take.
+ * captured melody and the optional bassline (absent entirely on a
+ * chart that never recorded one), all scheduled precisely up front
+ * against the Web Audio clock (see recordingSession.js's
+ * `_scheduleChordBacking` for why that's the right pattern here, not
+ * incremental lookahead: the whole song and its timing are already
+ * fully known before playback starts). No count-in -- this is "hear
+ * the song," not a take.
  */
 
 import { BEATS_PER_BAR } from './recordingPipeline.js';
@@ -35,8 +37,10 @@ export async function playSong(chartData, { onDone, metronome = false } = {}) {
   const anchorAudioTime = audioContext.currentTime + 0.05; // small safety margin so the first note isn't already in the past
 
   // A pickup note's beat is negative -- the song can start before beat
-  // 0 of its first section, not just at it.
-  const startBeat = Math.min(0, ...chartData.melody.map((n) => n.beat));
+  // 0 of its first section, not just at it. Melody and bassline each
+  // have their own independent pickup-bar setting, so either one could
+  // be the earliest note in the whole song.
+  const startBeat = Math.min(0, ...chartData.melody.map((n) => n.beat), ...(chartData.bassline ?? []).map((n) => n.beat));
   const endBeat = Math.max(0, ...chartData.sections.map((s) => s.end_beat));
   const audioTimeForBeat = (beat) => anchorAudioTime + (beat - startBeat) * secondsPerBeat;
 
@@ -67,6 +71,12 @@ export async function playSong(chartData, { onDone, metronome = false } = {}) {
   }
 
   for (const note of chartData.melody) {
+    const when = audioTimeForBeat(note.beat);
+    const durationSeconds = note.duration_beats * secondsPerBeat;
+    playNoteForDuration(note.pitch, note.velocity, when, durationSeconds * 0.95);
+  }
+
+  for (const note of chartData.bassline ?? []) {
     const when = audioTimeForBeat(note.beat);
     const durationSeconds = note.duration_beats * secondsPerBeat;
     playNoteForDuration(note.pitch, note.velocity, when, durationSeconds * 0.95);

@@ -40,6 +40,7 @@ export default function ChordsReview({
 }) {
   const [chords, setChords] = useState(chordsResult.chords);
   const [sectionLengthBeats, setSectionLengthBeats] = useState(chordsResult.sectionLengthBeats);
+  const [skippedClusterCount, setSkippedClusterCount] = useState(chordsResult.skippedClusterCount ?? 0);
   const bars = sectionLengthBeats / beatsPerBar;
   const barStepBeats = BAR_STEP_UNIT * beatsPerBar;
 
@@ -48,6 +49,7 @@ export default function ChordsReview({
     const reprocessed = processChordsPass(chordsResult.rawMessages, tempo, chordsResult.captureDurationSeconds, newSubdivisionsPerBeat, beatsPerBar);
     setChords(reprocessed.chords);
     setSectionLengthBeats(reprocessed.sectionLengthBeats);
+    setSkippedClusterCount(reprocessed.skippedClusterCount);
   }
 
   function handleTempoChange(newTempo) {
@@ -55,6 +57,7 @@ export default function ChordsReview({
     const reprocessed = processChordsPass(chordsResult.rawMessages, newTempo, chordsResult.captureDurationSeconds, subdivisionsPerBeat, beatsPerBar);
     setChords(reprocessed.chords);
     setSectionLengthBeats(reprocessed.sectionLengthBeats);
+    setSkippedClusterCount(reprocessed.skippedClusterCount);
   }
 
   return (
@@ -85,6 +88,13 @@ export default function ChordsReview({
         <TempoInput value={tempo} onChange={handleTempoChange} />
         <QuantizationSelect label="Quantization" value={subdivisionsPerBeat} onChange={handleQuantizationChange} />
       </div>
+
+      {skippedClusterCount > 0 && (
+        <div className="panel" style={{ borderColor: 'var(--accent)', color: 'var(--ink-soft)', fontSize: 13 }}>
+          {skippedClusterCount} moment{skippedClusterCount === 1 ? '' : 's'} in this take didn't form a recognizable chord (e.g. a stray note or a
+          bit of melody played by accident) and {skippedClusterCount === 1 ? "wasn't" : "weren't"} included below -- everything else came through fine.
+        </div>
+      )}
 
       <div className="panel">
         <span className="panel-label">Chord chart</span>

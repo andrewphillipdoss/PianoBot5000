@@ -68,10 +68,12 @@ export class RecordingSession {
    *   no pickup bar configured -- there's nothing to distinguish.
    * @param {(result: object) => void} [options.onDone]
    * @param {(error: Error) => void} [options.onError] - fires instead of
-   *   onDone when the just-captured take can't be turned into a result
-   *   (chords mode: detectChords() rejecting an unrecognizable cluster of
-   *   held notes -- see theory.js). Phase drops back to 'idle' so the
-   *   player can just hit record again.
+   *   onDone on a genuinely unexpected failure turning a take into a
+   *   result. Not how chords mode handles an unrecognizable cluster
+   *   any more -- detectChords() (see theory.js) just drops one it
+   *   can't make sense of and keeps the rest of the take, rather than
+   *   failing the whole thing over it. Phase drops back to 'idle' so
+   *   the player can just hit record again.
    */
   constructor({ tempo, mode, subdivisionsPerBeat, quantizeStrength, pickupBeats, beatsPerBar, onPhaseChange, onPickupBarChange, onDone, onError }) {
     subdivisionsPerBeat ??= mode === 'melody' ? DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT : DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT;

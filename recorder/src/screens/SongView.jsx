@@ -25,7 +25,7 @@ import './shared.css';
  * a simple melody piano-roll -- real lead-sheet notation rendering is
  * a deliberately separate, later piece; see the README.
  */
-export default function SongView({ song, onBack, onAddSection, onReRecordChords, onReRecordMelody, onDelete }) {
+export default function SongView({ song, onBack, onAddSection, onReRecordChords, onReRecordMelody, onReRecordBassline, onDelete }) {
   const [chartData, setChartData] = useState(null);
   const [error, setError] = useState(null);
   const [metronome, setMetronome] = useState(false); // off by default -- this is "hear the song," not a take; on by request, e.g. to follow along precisely
@@ -180,6 +180,13 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
               value={readChartQuantization(chartData).melodyQuantization}
               onChange={(value) => handleQuantizationChange({ melodyQuantization: value })}
             />
+            {readChartQuantization(chartData).hasBassline && (
+              <QuantizationSelect
+                label="Bassline quantization"
+                value={readChartQuantization(chartData).basslineQuantization}
+                onChange={(value) => handleQuantizationChange({ basslineQuantization: value })}
+              />
+            )}
           </div>
 
           {chartData.sections.map((section, index) => {
@@ -196,6 +203,9 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
             // visibly for a later section -- global and section-relative
             // coordinates are identical there by coincidence.
             const sectionMelody = chartData.melody
+              .filter((n) => entrySectionLabel(n, chartData.sections) === section.label)
+              .map((n) => ({ ...n, beat: n.beat - section.start_beat }));
+            const sectionBassline = (chartData.bassline ?? [])
               .filter((n) => entrySectionLabel(n, chartData.sections) === section.label)
               .map((n) => ({ ...n, beat: n.beat - section.start_beat }));
             const bars = (section.end_beat - section.start_beat) / beatsPerBar;
@@ -221,9 +231,21 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
                   <MelodyRoll notes={sectionMelody} sectionLengthBeats={section.end_beat - section.start_beat} beatsPerBar={beatsPerBar} />
                 </div>
 
+                {readChartQuantization(chartData).hasBassline && (
+                  <div className="panel">
+                    <span className="panel-label">
+                      Section {section.label} bassline &mdash; {sectionBassline.length} note{sectionBassline.length === 1 ? '' : 's'}
+                    </span>
+                    <MelodyRoll notes={sectionBassline} sectionLengthBeats={section.end_beat - section.start_beat} beatsPerBar={beatsPerBar} />
+                  </div>
+                )}
+
                 <div className="actions-row" style={{ justifyContent: 'flex-start', gap: 10 }}>
                   <button className="btn-ghost" onClick={() => onReRecordChords(chartData, index)}>Re-record Chords</button>
                   <button className="btn-ghost" onClick={() => onReRecordMelody(chartData, index)}>Re-record Melody</button>
+                  {readChartQuantization(chartData).hasBassline && (
+                    <button className="btn-ghost" onClick={() => onReRecordBassline(chartData, index)}>Re-record Bassline</button>
+                  )}
                 </div>
               </div>
             );

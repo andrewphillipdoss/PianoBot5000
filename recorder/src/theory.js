@@ -281,13 +281,17 @@ function isolatedBassPitchClass(sortedPitches) {
 }
 
 /**
- * Turn a captured left-hand (chords) take into ChordEvents. Each
- * cluster's pitch classes must form a recognizable chord shape (see
- * `detectChordQuality`) -- a cluster that doesn't is a real problem
- * with the take (an extra/missing note, or something further outside
- * this app's chord vocabulary than a slash chord can explain), so this
- * throws with the beat position and pitches involved rather than
- * silently guessing, so the UI can point at exactly what to re-record.
+ * Turn a captured left-hand (chords) take into ChordEvents. A cluster
+ * whose pitch classes don't form a recognizable chord shape (see
+ * `detectChordQuality`) -- a single stray note from an accidental
+ * melodic run mixed into the take, an incomplete voicing, whatever --
+ * is dropped rather than kept as a guess, but does NOT fail the whole
+ * take: every other, genuinely recognizable cluster is still returned.
+ * One bad cluster costing an entire otherwise-good take (re-recording
+ * every real chord in it just to fix one moment) is worse than a small
+ * gap in the chart at that one spot; `processChordsPass` in
+ * recordingPipeline.js surfaces how many clusters were skipped this
+ * way, for the UI to mention without blocking on it.
  *
  * `bassPitchClass` on the result names the isolated bass note (see
  * above) whenever the cluster has one -- `formatChordSymbol` shows it
@@ -305,7 +309,8 @@ function isolatedBassPitchClass(sortedPitches) {
  *     the isolated bass, on their own, might.
  */
 export function detectChords(notes, thresholdBeats = 0.15) {
-  return clusterOnsets(notes, thresholdBeats).map((cluster) => {
+  const chords = [];
+  for (const cluster of clusterOnsets(notes, thresholdBeats)) {
     const pitches = cluster.map((n) => n.pitch).sort((a, b) => a - b);
     const pitchClasses = cluster.map((n) => n.pitch % 12);
     const isolatedBass = isolatedBassPitchClass(pitches);
@@ -316,21 +321,17 @@ export function detectChords(notes, thresholdBeats = 0.15) {
       detected = detectChordQuality(upperPitchClasses);
     }
 
-    if (!detected) {
-      throw new Error(
-        `couldn't recognize a chord at beat ${cluster[0].start.toFixed(2)}: pitches ` +
-          `[${pitches.join(', ')}] (pitch classes [${[...new Set(pitchClasses)].sort((a, b) => a - b).join(', ')}]) -- ` +
-          'expected 3 distinct pitch classes forming a triad/sus chord, 4 forming a 7th/6th chord, or 5 forming a 9th chord'
-      );
-    }
-    return {
+    if (!detected) continue; // not a recognizable shape -- skip this one cluster, keep the rest of the take
+
+    chords.push({
       rootPitchClass: detected.rootPitchClass,
       quality: detected.quality,
       bassPitchClass: isolatedBass ?? detected.rootPitchClass,
       start: Math.min(...cluster.map((n) => n.start)),
       end: Math.max(...cluster.map((n) => n.end)),
-    };
-  });
+    });
+  }
+  return chords;
 }
 
 /**

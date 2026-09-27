@@ -178,6 +178,46 @@ describe('processChordsPass', () => {
     const { chords } = processChordsPass(messages, TEMPO, 4 * SPB);
     expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 }]);
   });
+
+  it('drops a stray note/melody moment mixed into the take instead of failing the whole recording', () => {
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 48, velocity: 90 }, // C3 -- a good C major triad, beat 0
+      { timestamp: 0, type: 'noteon', note: 52, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 55, velocity: 90 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 48, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 52, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 55, velocity: 0 },
+      // A single stray note mid-take -- long/loud enough to survive
+      // dropAccidentalTouches, but only one note: not a recognizable
+      // chord shape at all (e.g. a melody line played by accident).
+      { timestamp: 6 * SPB, type: 'noteon', note: 70, velocity: 90 },
+      { timestamp: 6.5 * SPB, type: 'noteoff', note: 70, velocity: 0 },
+      { timestamp: 8 * SPB, type: 'noteon', note: 53, velocity: 90 }, // F3 -- a good F major triad, beat 8
+      { timestamp: 8 * SPB, type: 'noteon', note: 57, velocity: 90 },
+      { timestamp: 8 * SPB, type: 'noteon', note: 60, velocity: 90 },
+      { timestamp: 12 * SPB, type: 'noteoff', note: 53, velocity: 0 },
+      { timestamp: 12 * SPB, type: 'noteoff', note: 57, velocity: 0 },
+      { timestamp: 12 * SPB, type: 'noteoff', note: 60, velocity: 0 },
+    ];
+    const { chords, skippedClusterCount } = processChordsPass(messages, TEMPO, 12 * SPB);
+    expect(chords).toEqual([
+      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 },
+      { rootPitchClass: 5, quality: 'maj', bassPitchClass: 5, start: 8, end: 12 },
+    ]);
+    expect(skippedClusterCount).toBe(1);
+  });
+
+  it('reports zero skipped clusters for a clean take', () => {
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 48, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 52, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 55, velocity: 90 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 48, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 52, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 55, velocity: 0 },
+    ];
+    expect(processChordsPass(messages, TEMPO, 4 * SPB).skippedClusterCount).toBe(0);
+  });
 });
 
 describe('processMelodyPass', () => {

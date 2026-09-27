@@ -25,6 +25,8 @@ export default function SongSetup({ initial = null, onBack, onSubmit }) {
   const [key, setKey] = useState(initial?.key ?? 'C');
   const [tempo, setTempo] = useState(initial?.tempo ?? 96);
   const [beatsPerBar, setBeatsPerBar] = useState(initial?.beatsPerBar ?? 4);
+  const [hasBassline, setHasBassline] = useState(initial?.hasBassline ?? false);
+  const [basslineFirst, setBasslineFirst] = useState(initial?.basslineFirst ?? false);
 
   const canSubmit = title.trim().length > 0 && key.trim().length > 0 && Number(tempo) > 0;
 
@@ -51,6 +53,19 @@ export default function SongSetup({ initial = null, onBack, onSubmit }) {
         <TimeSignatureSelect value={beatsPerBar} onChange={setBeatsPerBar} />
       </div>
 
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink-soft)' }}>
+          <input type="checkbox" checked={hasBassline} onChange={(e) => setHasBassline(e.target.checked)} />
+          Record a separate bass line, in addition to chords and melody
+        </label>
+        {hasBassline && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink-soft)', marginLeft: 22 }}>
+            <input type="checkbox" checked={basslineFirst} onChange={(e) => setBasslineFirst(e.target.checked)} />
+            Record the bass line before the melody, not after
+          </label>
+        )}
+      </div>
+
       <div className="actions-row" style={{ justifyContent: 'flex-end', gap: 12 }}>
         {!canSubmit && (
           <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
@@ -60,7 +75,7 @@ export default function SongSetup({ initial = null, onBack, onSubmit }) {
         <button
           className="btn-primary"
           disabled={!canSubmit}
-          onClick={() => onSubmit({ title: title.trim(), key: key.trim(), tempo: Number(tempo), beatsPerBar })}
+          onClick={() => onSubmit({ title: title.trim(), key: key.trim(), tempo: Number(tempo), beatsPerBar, hasBassline, basslineFirst })}
         >
           Start Recording Chords &rarr;
         </button>

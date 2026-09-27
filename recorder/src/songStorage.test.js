@@ -11,7 +11,10 @@ import {
   readChartBeatsPerBar,
   readChartQuantization,
   replaceSectionData,
+  requantizeChartData,
+  sectionBasslineAsInternal,
   sectionChordsAsInternal,
+  sectionMelodyAsInternal,
   slugify,
   summarizeChart,
 } from './songStorage.js';
@@ -85,12 +88,18 @@ describe('buildChartData', () => {
       melodyQuantization: 4, // not passed above -- defaults to 16th notes
       melodyQuantizeStrength: 0.6, // not passed above -- defaults to the softened snap
       melodyPickupBeats: 4, // not passed above -- defaults to a full pickup bar
+      hasBassline: false, // not passed above -- no bassline pass for this song
+      basslineFirst: false,
+      basslineQuantization: 4,
+      basslineQuantizeStrength: 0.6,
+      basslinePickupBeats: 4,
       sections: [{ label: 'A', start_beat: 0, end_beat: 16 }],
       chords: [
         { beat: 0, duration_beats: 4, chord: 'C', section: 'A' },
         { beat: 4, duration_beats: 4, chord: 'G7', section: 'A' },
       ],
       melody: [{ beat: 0, duration_beats: 1, pitch: 60, velocity: 90, section: 'A' }],
+      bassline: [],
     });
   });
 
@@ -120,6 +129,11 @@ describe('readChartQuantization', () => {
       melodyQuantization: 8,
       melodyQuantizeStrength: 1,
       melodyPickupBeats: 0,
+      hasBassline: false,
+      basslineFirst: false,
+      basslineQuantization: 4,
+      basslineQuantizeStrength: 0.6,
+      basslinePickupBeats: 4,
     });
   });
 
@@ -129,8 +143,36 @@ describe('readChartQuantization', () => {
       melodyQuantization: 8,
       melodyQuantizeStrength: 0.6,
       melodyPickupBeats: 4,
+      hasBassline: false,
+      basslineFirst: false,
+      basslineQuantization: 4,
+      basslineQuantizeStrength: 0.6,
+      basslinePickupBeats: 4,
     });
-    expect(readChartQuantization({})).toEqual({ chordsQuantization: 2, melodyQuantization: 4, melodyQuantizeStrength: 0.6, melodyPickupBeats: 4 });
+    expect(readChartQuantization({})).toEqual({
+      chordsQuantization: 2,
+      melodyQuantization: 4,
+      melodyQuantizeStrength: 0.6,
+      melodyPickupBeats: 4,
+      hasBassline: false,
+      basslineFirst: false,
+      basslineQuantization: 4,
+      basslineQuantizeStrength: 0.6,
+      basslinePickupBeats: 4,
+    });
+  });
+
+  it('reads bassline settings back, and falls back basslinePickupBeats to a full bar of the time signature', () => {
+    expect(
+      readChartQuantization({ hasBassline: true, basslineFirst: true, basslineQuantization: 8, basslineQuantizeStrength: 1, basslinePickupBeats: 0 })
+    ).toMatchObject({
+      hasBassline: true,
+      basslineFirst: true,
+      basslineQuantization: 8,
+      basslineQuantizeStrength: 1,
+      basslinePickupBeats: 0,
+    });
+    expect(readChartQuantization({ beatsPerBar: 3 }).basslinePickupBeats).toBe(3);
   });
 
   it('falls back melodyPickupBeats to a full bar of the chart\'s own (non-default) time signature', () => {
@@ -208,6 +250,37 @@ describe('appendSectionData', () => {
     // pickup note, which is exactly the ambiguity the tag exists to resolve.
     expect(withB.melody).toEqual([{ beat: 14, duration_beats: 2, pitch: 72, velocity: 90, section: 'B' }]);
   });
+
+  it('offsets bassline notes onto the global timeline the same way as melody', () => {
+    const chartData = appendSectionData(emptyChartData({ title: 'T', key: 'C', tempo: 120 }), {
+      sectionLabel: 'A',
+      sectionLengthBeats: 16,
+      chords: [],
+      melody: [],
+      bassline: [{ pitch: 36, start: 0, end: 4, velocity: 100 }],
+    });
+    const withB = appendSectionData(chartData, {
+      sectionLabel: 'B',
+      sectionLengthBeats: 8,
+      chords: [],
+      melody: [],
+      bassline: [{ pitch: 41, start: 0, end: 4, velocity: 95 }],
+    });
+    expect(withB.bassline).toEqual([
+      { beat: 0, duration_beats: 4, pitch: 36, velocity: 100, section: 'A' },
+      { beat: 16, duration_beats: 4, pitch: 41, velocity: 95, section: 'B' },
+    ]);
+  });
+
+  it('defaults bassline to an empty list for a song that never records one', () => {
+    const chartData = appendSectionData(emptyChartData({ title: 'T', key: 'C', tempo: 120 }), {
+      sectionLabel: 'A',
+      sectionLengthBeats: 16,
+      chords: [],
+      melody: [],
+    });
+    expect(chartData.bassline).toEqual([]);
+  });
 });
 
 describe('entrySectionLabel', () => {
@@ -262,6 +335,40 @@ describe('sectionChordsAsInternal', () => {
   });
 });
 
+describe('sectionMelodyAsInternal / sectionBasslineAsInternal', () => {
+  it('are the exact inverse of what appendSectionData does to a section\'s melody/bassline notes', () => {
+    const internalMelody = [{ pitch: 60, start: 0, end: 1, velocity: 90 }];
+    const internalBassline = [{ pitch: 36, start: 0, end: 2, velocity: 100 }];
+    const chartData = appendSectionData(emptyChartData({ title: 'T', key: 'C', tempo: 120 }), {
+      sectionLabel: 'A',
+      sectionLengthBeats: 8,
+      chords: [],
+      melody: internalMelody,
+      bassline: internalBassline,
+    });
+    const withB = appendSectionData(chartData, {
+      sectionLabel: 'B',
+      sectionLengthBeats: 8,
+      chords: [],
+      melody: internalMelody,
+      bassline: internalBassline,
+    });
+
+    expect(sectionMelodyAsInternal(withB, withB.sections[1])).toEqual(internalMelody);
+    expect(sectionBasslineAsInternal(withB, withB.sections[1])).toEqual(internalBassline);
+  });
+
+  it('returns an empty list for a chart that never recorded a bassline at all', () => {
+    const chartData = appendSectionData(emptyChartData({ title: 'T', key: 'C', tempo: 120 }), {
+      sectionLabel: 'A',
+      sectionLengthBeats: 8,
+      chords: [],
+      melody: [],
+    });
+    expect(sectionBasslineAsInternal(chartData, chartData.sections[0])).toEqual([]);
+  });
+});
+
 describe('replaceSectionData', () => {
   function twoSectionChart() {
     let chartData = buildChartData({
@@ -305,6 +412,27 @@ describe('replaceSectionData', () => {
     ]);
   });
 
+  it('replaces bassline the same way, and defaults it to empty when not given (e.g. re-recording just chords/melody)', () => {
+    let chartData = appendSectionData(emptyChartData({ title: 'T', key: 'C', tempo: 120 }), {
+      sectionLabel: 'A',
+      sectionLengthBeats: 16,
+      chords: [],
+      melody: [],
+      bassline: [{ pitch: 36, start: 0, end: 4, velocity: 100 }],
+    });
+
+    const replaced = replaceSectionData(chartData, 0, {
+      sectionLengthBeats: 16,
+      chords: [],
+      melody: [],
+      bassline: [{ pitch: 41, start: 0, end: 4, velocity: 90 }],
+    });
+    expect(replaced.bassline).toEqual([{ beat: 0, duration_beats: 4, pitch: 41, velocity: 90, section: 'A' }]);
+
+    const replacedNoBassline = replaceSectionData(chartData, 0, { sectionLengthBeats: 16, chords: [], melody: [] });
+    expect(replacedNoBassline.bassline).toEqual([]); // the old bassline note is gone, not silently carried over -- callers preserve it themselves via sectionBasslineAsInternal if that's what they want
+  });
+
   it('replaces an earlier section, shifting every later section\'s length/beats without touching earlier ones', () => {
     const chartData = twoSectionChart();
 
@@ -326,6 +454,27 @@ describe('replaceSectionData', () => {
       { beat: 0, duration_beats: 2, pitch: 69, velocity: 100, section: 'A' }, // A's new melody
       { beat: 20, duration_beats: 1, pitch: 64, velocity: 80, section: 'B' }, // B's original melody, shifted +4
     ]);
+  });
+});
+
+describe('requantizeChartData', () => {
+  it('re-snaps bassline the same way as chords/melody, and keeps its own quantization field', () => {
+    const chartData = appendSectionData(emptyChartData({ title: 'T', key: 'C', tempo: 120 }), {
+      sectionLabel: 'A',
+      sectionLengthBeats: 8,
+      chords: [],
+      melody: [],
+      bassline: [{ pitch: 36, start: 0.1, end: 3.9, velocity: 100 }],
+    });
+
+    const requantized = requantizeChartData(chartData, { chordsQuantization: 2, melodyQuantization: 4, basslineQuantization: 1 }); // 1 = quarter notes
+    expect(requantized.basslineQuantization).toBe(1);
+    expect(requantized.bassline).toEqual([{ beat: 0, duration_beats: 4, pitch: 36, velocity: 100, section: 'A' }]);
+  });
+
+  it('falls back basslineQuantization to the chart\'s own already-saved setting when not given', () => {
+    const chartData = { ...emptyChartData({ title: 'T', key: 'C', tempo: 120 }), basslineQuantization: 8 };
+    expect(requantizeChartData(chartData, { chordsQuantization: 2, melodyQuantization: 4 }).basslineQuantization).toBe(8);
   });
 });
 

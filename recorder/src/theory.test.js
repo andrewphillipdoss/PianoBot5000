@@ -487,22 +487,47 @@ describe('detectChords', () => {
     expect(chord.bassPitchClass).toBe(2);
   });
 
-  it('throws with the beat position and pitches for an unrecognizable cluster', () => {
+  it('drops an unrecognizable cluster rather than throwing', () => {
     const notes = [
       { pitch: 48, start: 2.0, end: 3.0 },
       { pitch: 49, start: 2.0, end: 3.0 },
       { pitch: 50, start: 2.0, end: 3.0 },
     ];
-    expect(() => detectChords(notes, 0.05)).toThrow(/beat 2\.00/);
+    expect(detectChords(notes, 0.05)).toEqual([]);
   });
 
-  it('still throws when neither the whole cluster nor the notes above an isolated bass form a recognized chord', () => {
+  it('drops a single stray note (e.g. a melody line accidentally mixed into the chords take) the same way', () => {
+    // The exact real-world case this behavior exists for: a lone note
+    // (not even 3 distinct pitch classes) mid-take, surrounded by
+    // otherwise-good triads -- losing the whole take over this one
+    // moment would be far worse than a small gap in the chart.
+    const notes = [{ pitch: 70, start: 4.0, end: 4.2 }];
+    expect(detectChords(notes, 0.05)).toEqual([]);
+  });
+
+  it('keeps every recognizable cluster and only skips the unrecognizable one in between', () => {
+    const notes = [
+      { pitch: 48, start: 0, end: 2 }, // C3
+      { pitch: 52, start: 0, end: 2 }, // E3
+      { pitch: 55, start: 0, end: 2 }, // G3 -- a good C major triad
+      { pitch: 74, start: 4, end: 4.2 }, // a single stray note (e.g. a melody slip)
+      { pitch: 53, start: 8, end: 10 }, // F3
+      { pitch: 57, start: 8, end: 10 }, // A3
+      { pitch: 60, start: 8, end: 10 }, // C4 -- a good F major triad
+    ];
+    const chords = detectChords(notes, 0.05);
+    expect(chords).toHaveLength(2);
+    expect(chords[0]).toMatchObject({ rootPitchClass: 0, quality: 'maj' });
+    expect(chords[1]).toMatchObject({ rootPitchClass: 5, quality: 'maj' });
+  });
+
+  it('still returns nothing when neither the whole cluster nor the notes above an isolated bass form a recognized chord', () => {
     const notes = [
       { pitch: 38, start: 0, end: 4 }, // D2, isolated bass
       { pitch: 60, start: 0, end: 4 }, // C4
       { pitch: 61, start: 0, end: 4 }, // C#4 -- not a recognizable shape either way
     ];
-    expect(() => detectChords(notes, 0.05)).toThrow(/couldn't recognize a chord/);
+    expect(detectChords(notes, 0.05)).toEqual([]);
   });
 });
 

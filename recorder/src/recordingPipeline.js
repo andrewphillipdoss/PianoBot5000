@@ -8,6 +8,7 @@
 
 import {
   clipOverlappingNotes,
+  clusterOnsets,
   detectChords,
   dropAccidentalTouches,
   mergeConsecutiveChords,
@@ -72,8 +73,8 @@ export const DEFAULT_MELODY_QUANTIZE_STRENGTH = 0.6;
 const CHORD_CLUSTER_THRESHOLD_BEATS = 0.35;
 
 /**
- * A completed chords pass -> { chords, sectionLengthBeats }. The
- * chords pass is authoritative for a section's length (see this
+ * A completed chords pass -> { chords, sectionLengthBeats, skippedClusterCount }.
+ * The chords pass is authoritative for a section's length (see this
  * project's own design discussion for why, not melody): trailing
  * empty bars -- dead air while reaching for the stop key -- are
  * trimmed first, then what's left rounds to the nearest 4-bar
@@ -90,9 +91,14 @@ const CHORD_CLUSTER_THRESHOLD_BEATS = 0.35;
  * Notes too brief or too soft to be a deliberately played chord tone
  * (dropAccidentalTouches) are filtered out before clustering -- an
  * accidentally brushed adjacent key otherwise either gets folded into
- * the chord as a wrong extra pitch class, or breaks recognition
- * outright (detectChords throws on a cluster that doesn't form a
- * recognized shape).
+ * the chord as a wrong extra pitch class, or, held long/hard enough to
+ * survive that filter, breaks recognition outright for its own cluster.
+ * Either way, a cluster detectChords can't make sense of (that,
+ * *or* a genuine stray note/run -- a bit of melody accidentally played
+ * during the chords take) is dropped, not thrown on; `skippedClusterCount`
+ * says how many, so the UI can mention it without blocking on it -- one
+ * bad moment costing an otherwise-good take, when every other chord was
+ * fine, would be far worse.
  *
  * `beatsPerBar` is the song's time signature (its numerator, treating
  * the beat as a quarter note) -- defaults to 4/4, but the trailing-
@@ -110,7 +116,13 @@ export function processChordsPass(
   // when stop() was pressed (the normal case) closes there instead of
   // being dropped for never getting an explicit note-off.
   const rawNotes = secondsToBeats(dropAccidentalTouches(messagesToNotes(rawMessages, captureDurationSeconds)), tempo);
-  const rawChords = mergeConsecutiveChords(detectChords(rawNotes, CHORD_CLUSTER_THRESHOLD_BEATS));
+  const detectedChords = detectChords(rawNotes, CHORD_CLUSTER_THRESHOLD_BEATS);
+  // detectChords returns one entry per *recognized* cluster -- the gap
+  // between that and the total cluster count is exactly how many got
+  // dropped for not forming a known shape.
+  const totalClusterCount = clusterOnsets(rawNotes, CHORD_CLUSTER_THRESHOLD_BEATS).length;
+  const skippedClusterCount = totalClusterCount - detectedChords.length;
+  const rawChords = mergeConsecutiveChords(detectedChords);
   // Only *now*, after clustering has already decided which notes are
   // one chord, does the display grid come in -- purely rounding each
   // chord's boundaries to it, same as any note (including the same
@@ -127,11 +139,18 @@ export function processChordsPass(
   const trimmedBeats = trimTrailingEmptyBars(rawTotalBeats, chords.map((c) => c.start), beatsPerBar);
   const sectionLengthBeats = roundToBarInterval(trimmedBeats, 4, beatsPerBar);
 
-  return { chords, sectionLengthBeats };
+  return { chords, sectionLengthBeats, skippedClusterCount };
 }
 
 /**
- * A completed melody pass -> { notes }. Capturing runs for one pickup
+ * A completed melody pass -> { notes }. Also used, as-is, for the
+ * optional bassline pass (RecordBassline.jsx) -- this processing
+ * (pickup rebasing, quantize-strength, monophonic clipping) has
+ * nothing melody-specific about it; it applies equally to any single
+ * monophonic voice captured against the section's already-fixed
+ * chords/length, not just the treble line.
+ *
+ * Capturing runs for one pickup
  * bar (PICKUP_BEATS) plus `sectionLengthBeats` (already fixed by the
  * chords pass, see recordingSession.js) -- notes get rebased so beat 0
  * lines up with the actual downbeat (where the chords start), meaning

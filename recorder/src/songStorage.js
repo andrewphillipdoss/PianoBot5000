@@ -40,17 +40,19 @@ export function chartFileName(title) {
  * `beatsPerBar` (the time signature's numerator, treating the beat as
  * a quarter note -- 3 for 3/4, 4 for 4/4, etc.), `chordsQuantization`/
  * `melodyQuantization` (subdivisions/beat), `melodyQuantizeStrength`
- * (how hard melody notes snap to that grid), and `melodyPickupBeats`
+ * (how hard melody notes snap to that grid), `melodyPickupBeats`
  * (how much lead-in melody capture gives a pickup note before the
  * chords enter -- 0 skips the pickup bar entirely; see
- * recordingPipeline.js) aren't part of the legacy CLI's own chart
+ * recordingPipeline.js), and the equivalent `hasBassline`/
+ * `basslineFirst`/`bassline*` settings for the optional bassline pass
+ * (see RecordBassline.jsx) aren't part of the legacy CLI's own chart
  * format, but the legacy reader ignores unknown top-level keys, so
  * they round-trip harmlessly here: re-recording an already-saved song
  * reads them back out and keeps using the same settings it was
  * originally recorded with, rather than silently resetting to the
- * default. `melodyPickupBeats` defaults to a full bar of *whatever*
- * `beatsPerBar` is, not a fixed 4, since a bar's own length depends on
- * the time signature.
+ * default. `melodyPickupBeats`/`basslinePickupBeats` default to a full
+ * bar of *whatever* `beatsPerBar` is, not a fixed 4, since a bar's own
+ * length depends on the time signature.
  */
 export function emptyChartData({
   title,
@@ -61,19 +63,31 @@ export function emptyChartData({
   melodyQuantization = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
   melodyQuantizeStrength = DEFAULT_MELODY_QUANTIZE_STRENGTH,
   melodyPickupBeats = beatsPerBar,
+  hasBassline = false,
+  basslineFirst = false,
+  basslineQuantization = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
+  basslineQuantizeStrength = DEFAULT_MELODY_QUANTIZE_STRENGTH,
+  basslinePickupBeats = beatsPerBar,
 }) {
-  return { title, key, tempo, beatsPerBar, chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats, sections: [], chords: [], melody: [] };
+  return {
+    title, key, tempo, beatsPerBar,
+    chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats,
+    hasBassline, basslineFirst, basslineQuantization, basslineQuantizeStrength, basslinePickupBeats,
+    sections: [], chords: [], melody: [], bassline: [],
+  };
 }
 
 /**
- * Read a chart's quantization settings back out, tolerating a chart
- * saved before chords/melody had separate settings (a single
- * `quantization` field, applied to both) or before `melodyQuantizeStrength`/
- * `melodyPickupBeats` existed at all -- falls back through those, then
- * to the current defaults, so an old file never throws or silently
- * loses its own recorded settings. `melodyPickupBeats` falls back to a
- * full bar of the chart's own `beatsPerBar` (itself defaulting to 4/4
- * for a chart saved before time signature existed), not a fixed 4.
+ * Read a chart's quantization/bassline settings back out, tolerating a
+ * chart saved before chords/melody had separate settings (a single
+ * `quantization` field, applied to both), before `melodyQuantizeStrength`/
+ * `melodyPickupBeats` existed at all, or before the bassline pass
+ * existed at all -- falls back through those, then to the current
+ * defaults, so an old file never throws or silently loses its own
+ * recorded settings. `melodyPickupBeats`/`basslinePickupBeats` fall
+ * back to a full bar of the chart's own `beatsPerBar` (itself
+ * defaulting to 4/4 for a chart saved before time signature existed),
+ * not a fixed 4.
  */
 export function readChartQuantization(chartData) {
   const beatsPerBar = chartData.beatsPerBar ?? DEFAULT_BEATS_PER_BAR;
@@ -82,6 +96,11 @@ export function readChartQuantization(chartData) {
     melodyQuantization: chartData.melodyQuantization ?? chartData.quantization ?? DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
     melodyQuantizeStrength: chartData.melodyQuantizeStrength ?? DEFAULT_MELODY_QUANTIZE_STRENGTH,
     melodyPickupBeats: chartData.melodyPickupBeats ?? beatsPerBar,
+    hasBassline: chartData.hasBassline ?? false,
+    basslineFirst: chartData.basslineFirst ?? false,
+    basslineQuantization: chartData.basslineQuantization ?? DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
+    basslineQuantizeStrength: chartData.basslineQuantizeStrength ?? DEFAULT_MELODY_QUANTIZE_STRENGTH,
+    basslinePickupBeats: chartData.basslinePickupBeats ?? beatsPerBar,
   };
 }
 
@@ -117,8 +136,9 @@ export function nextSectionLabel(existingSectionCount) {
  * is exactly what this tag exists to avoid for anything recorded from
  * here on.
  */
-export function appendSectionData(chartData, { sectionLabel, sectionLengthBeats, chords, melody }) {
+export function appendSectionData(chartData, { sectionLabel, sectionLengthBeats, chords, melody, bassline = [] }) {
   const startBeat = chartData.sections.length === 0 ? 0 : chartData.sections.at(-1).end_beat;
+  const toEntries = (notes) => notes.map((n) => ({ beat: n.start + startBeat, duration_beats: n.end - n.start, pitch: n.pitch, velocity: n.velocity, section: sectionLabel }));
   return {
     ...chartData,
     sections: [...chartData.sections, { label: sectionLabel, start_beat: startBeat, end_beat: startBeat + sectionLengthBeats }],
@@ -131,16 +151,8 @@ export function appendSectionData(chartData, { sectionLabel, sectionLengthBeats,
         section: sectionLabel,
       })),
     ],
-    melody: [
-      ...chartData.melody,
-      ...melody.map((n) => ({
-        beat: n.start + startBeat,
-        duration_beats: n.end - n.start,
-        pitch: n.pitch,
-        velocity: n.velocity,
-        section: sectionLabel,
-      })),
-    ],
+    melody: [...chartData.melody, ...toEntries(melody)],
+    bassline: [...(chartData.bassline ?? []), ...toEntries(bassline)],
   };
 }
 
@@ -201,6 +213,30 @@ export function sectionChordsAsInternal(chartData, section) {
     });
 }
 
+function sectionNotesAsInternal(entries, chartData, section) {
+  return entries
+    .filter((n) => entrySectionLabel(n, chartData.sections) === section.label)
+    .map((n) => ({ pitch: n.pitch, velocity: n.velocity, start: n.beat - section.start_beat, end: n.beat + n.duration_beats - section.start_beat }));
+}
+
+/**
+ * Same idea as `sectionChordsAsInternal`, for melody/bassline notes --
+ * needed whenever one of the three passes (chords/melody/bassline) is
+ * re-recorded on its own and the *other* two need to be carried
+ * forward unchanged into `replaceSectionData` rather than lost (there's
+ * no raw MIDI left for anything not actually being re-recorded right
+ * now, so this is the only way to get their already-captured notes
+ * back out in the internal NoteEvent shape).
+ */
+export function sectionMelodyAsInternal(chartData, section) {
+  return sectionNotesAsInternal(chartData.melody, chartData, section);
+}
+
+/** Same as `sectionMelodyAsInternal`, for the optional bassline track (absent entirely on a chart that never had one). */
+export function sectionBasslineAsInternal(chartData, section) {
+  return sectionNotesAsInternal(chartData.bassline ?? [], chartData, section);
+}
+
 /**
  * Replace *any* section's chords+melody+length in place -- re-recording
  * it. Every later section shifts by the length delta (both its own
@@ -212,7 +248,7 @@ export function sectionChordsAsInternal(chartData, section) {
  * following section apart from a genuine tail note of the section
  * being replaced.
  */
-export function replaceSectionData(chartData, sectionIndex, { sectionLengthBeats, chords, melody }) {
+export function replaceSectionData(chartData, sectionIndex, { sectionLengthBeats, chords, melody, bassline = [] }) {
   const originalSections = chartData.sections;
   const targetSection = originalSections[sectionIndex];
   const lengthDeltaBeats = sectionLengthBeats - (targetSection.end_beat - targetSection.start_beat);
@@ -259,6 +295,16 @@ export function replaceSectionData(chartData, sectionIndex, { sectionLengthBeats
         section: targetSection.label,
       }))
     ),
+    bassline: rebuild(
+      chartData.bassline ?? [],
+      bassline.map((n) => ({
+        beat: n.start + startBeat,
+        duration_beats: n.end - n.start,
+        pitch: n.pitch,
+        velocity: n.velocity,
+        section: targetSection.label,
+      }))
+    ),
   };
 }
 
@@ -278,13 +324,15 @@ export function replaceSectionData(chartData, sectionIndex, { sectionLengthBeats
  * equivalent for quantization purposes, since a whole-bar offset is
  * already on-grid at *any* subdivision.
  */
-export function requantizeChartData(chartData, { chordsQuantization, melodyQuantization }) {
+export function requantizeChartData(chartData, { chordsQuantization, melodyQuantization, basslineQuantization = readChartQuantization(chartData).basslineQuantization }) {
   return {
     ...chartData,
     chordsQuantization,
     melodyQuantization,
+    basslineQuantization,
     chords: requantizeEntries(chartData.chords, chordsQuantization),
     melody: requantizeEntries(chartData.melody, melodyQuantization),
+    bassline: requantizeEntries(chartData.bassline ?? [], basslineQuantization),
   };
 }
 

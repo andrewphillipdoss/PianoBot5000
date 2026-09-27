@@ -39,6 +39,10 @@ change since:
    raw MIDI left to re-derive from at that point. Quarter notes is
    useful for chords especially -- a coarser grid than the 8th-note
    default for a song whose chords never change faster than once a beat.
+   A checkbox here turns on an optional **bassline** pass, in addition
+   to chords and melody -- see below -- with a second checkbox to record
+   it before the melody pass instead of after (the only ordering choice
+   available; see below for why it's not offered before chords too).
 3. **Record Chords** -- Space (or click) starts a count-in, then records;
    Space again stops. Live feedback: held notes + the detected chord --
    triads, sus2/sus4, 6th chords, 7th chords (dom7/maj7/min7/m7b5/dim7/
@@ -49,19 +53,24 @@ change since:
    Section Complete, Song view) also carries a small second line of
    scale-degree "insignia" underneath it (e.g. `1 3 5 b7` under
    `Cdom7`) -- what each note in the chord actually *is*, not just the
-   chord's name as a whole (`describeChordTones` in theory.js). The
-   metronome clicks the beat (strong on the downbeat) plus a much
-   quieter eighth-note subdivision in between, so the off-the-beat feel
-   is easier to place while playing. Tempo is editable right here too
-   (and through Chords review), not fixed at song setup.
+   chord's name as a whole (`describeChordTones` in theory.js). A
+   cluster of notes that doesn't form a recognizable chord (a stray
+   note, a bit of melody played by accident) is dropped, not treated as
+   a failed take -- see below. The metronome clicks the beat (strong on
+   the downbeat) plus a much quieter eighth-note subdivision in between,
+   so the off-the-beat feel is easier to place while playing. Tempo is
+   editable right here too (and through Chords review), not fixed at
+   song setup.
 4. **Chords review** -- the detected chord chart, section length
    auto-computed (trailing dead air trimmed, rounded to the nearest 4
-   bars), adjustable by a 4-bar step before proceeding. Changing the
-   quantization *or the tempo* here re-derives this exact take from its
-   still-available raw MIDI at the new grid/BPM -- no re-recording
-   needed; a wrong tempo typed at setup is fixable here, not just a
-   rounding tweak, since every beat position is recomputed from the
-   fixed real-world capture duration.
+   bars), adjustable by a 4-bar step before proceeding. A note above the
+   chart mentions it if any moment in the take got skipped for not
+   forming a recognizable chord (see below), without blocking on it.
+   Changing the quantization *or the tempo* here re-derives this exact
+   take from its still-available raw MIDI at the new grid/BPM -- no
+   re-recording needed; a wrong tempo typed at setup is fixable here,
+   not just a rounding tweak, since every beat position is recomputed
+   from the fixed real-world capture duration.
 5. **Record Melody** -- capturing starts with one pickup bar before the
    chords enter by default (the status pill says so explicitly), so a
    pickup/anacrusis note has somewhere to go (it comes back with a
@@ -73,31 +82,43 @@ change since:
    the section's length while you play the melody over them -- no
    manual stop, it auto-finishes when the chords do. Space mid-take
    scraps it and restarts the count-in.
+5.5. **Record Bassline** (optional, see above) -- the exact same screen
+   and mechanics as Record Melody, just for a second, independent
+   monophonic line with its own quantization/snap-strength/pickup-bar
+   settings, saved separately (`chartData.bassline`, not `.melody`).
+   Comes before or after the melody pass per the song's own setting;
+   never before chords -- the chords pass stays authoritative for the
+   section's length either way (see the design discussion), so there's
+   nothing for a bassline-before-chords ordering to actually buy you.
 6. **Section Complete** -- Chord Chart view (bars + chord symbols,
    consecutive repeats of the same chord merged into one wider entry
    rather than listed twice) of what was captured, Re-record
-   Chords/Melody, **+ Add Another Section** (records the next section
-   right away, saving all of them together on Finalize), or Finalize
-   (writes the chart JSON to your songs folder). Changing melody
-   quantization/snap-strength here re-derives it from raw MIDI too (no
-   tempo picker here though -- see SectionComplete.jsx's own docstring
-   for why that's a deliberate boundary, not an oversight).
+   Chords/Melody/Bassline, **+ Add Another Section** (records the next
+   section right away, saving all of them together on Finalize), or
+   Finalize (writes the chart JSON to your songs folder). Changing
+   melody/bassline quantization/snap-strength here re-derives it from
+   raw MIDI too, when there still is any for that voice (re-recording
+   just one of the three preserves the other two exactly as they were,
+   with nothing left to re-derive them from -- see RecordSongFlow.jsx)
+   -- no tempo picker here though -- see SectionComplete.jsx's own
+   docstring for why that's a deliberate boundary, not an oversight.
 7. **Song view** -- click a song in My Songs to see every section's chord
-   chart and a simple piano-roll of its melody (time left-to-right, pitch
-   low-to-high; not real notation, see below), a Play button that plays
-   the whole song back (all sections, chords + melody together), an
-   editable tempo (every chord/melody beat is stored in beats, not
+   chart, a simple piano-roll of its melody, and (if the song has one)
+   its bassline too (time left-to-right, pitch low-to-high; not real
+   notation, see below), a Play button that plays the whole song back
+   (all sections, chords + melody + bassline together), an editable
+   tempo (every chord/melody/bassline beat is stored in beats, not
    seconds, so this only ever changes future playback speed -- nothing
-   about the recorded data itself needs to change), a quantization
-   picker (re-snaps the saved chart to a new grid, no re-recording), a
+   about the recorded data itself needs to change), quantization
+   pickers (re-snap the saved chart to a new grid, no re-recording), a
    time signature picker (see above), an optional metronome for playback
    (off by default -- "hear the song," not a take -- on by request, e.g.
    to follow along precisely), **+ Add Section** (appends a new section
-   to this already-saved song), Re-record Chords/Melody for *any*
-   section, not just the last (see below for how), and **Delete Song**
-   (a native `confirm()` prompt, not just a styled button -- there's no
-   undo once a chart file is gone; `songStorage.js`'s `deleteChartFile`
-   just calls the folder handle's own `removeEntry`).
+   to this already-saved song), Re-record Chords/Melody/Bassline for
+   *any* section, not just the last (see below for how), and **Delete
+   Song** (a native `confirm()` prompt, not just a styled button --
+   there's no undo once a chart file is gone; `songStorage.js`'s
+   `deleteChartFile` just calls the folder handle's own `removeEntry`).
 
 **Multi-section songs lay out sequentially on one shared beat timeline**
 (section B starts exactly where A ends) -- both "add a section" entry
@@ -156,6 +177,20 @@ arriving with no note-off in between and only a few ms after the first
 (common on some keyboards) rather than a real second strike, which
 otherwise reads as a spurious "double hit" the player never played.
 
+**A chord cluster that doesn't form a recognizable shape is dropped,
+not treated as a failed take** -- `detectChords` used to throw the
+instant one cluster in an entire take didn't match a known chord
+(theory.js's own recognized vocabulary, however wide -- see above), which
+meant a single stray note (a bit of melody played by accident, mid-take)
+cost the *whole* recording, every genuinely good chord in it included.
+It now just skips that one cluster and keeps going; `processChordsPass`
+reports how many got skipped (`skippedClusterCount`), and Chords review
+shows a small, non-blocking note about it above the chart when that's
+above zero, rather than blocking the player from proceeding at all. A
+real, unplayable take (nothing recognizable anywhere in it) now simply
+shows an empty chart instead of an error banner -- `ChordChart`'s own
+empty-state message already covered that case.
+
 **A captured note's start time is anchored to the count-in's own nominal
 schedule, not to a fresh clock read inside its setTimeout callback** --
 the fix for a real bug where notes could consistently land on the wrong
@@ -199,7 +234,12 @@ Chord Chart panel's row wrapping (`chordChartLayout.js`, above) caps rows
 by bar count, not pixel width -- CSS `flex-wrap` on `.chord-bar-row` is a
 safety net under that, for the case where enough short chords' `min-width`
 floors alone add up past the panel's actual width even within one
-nominally-fitting row.
+nominally-fitting row. `.chip-row` (the little pill-shaped stat/setting
+row at the top of most screens) got the same fix for the same reason,
+once enough settings chips -- tempo, three separate quantization
+pickers, a time signature picker -- stopped fitting on one line at
+ordinary window widths, which the bassline pass's own extra chips made
+routine rather than rare.
 
 **Slash chords are detected from the chords pass itself, not a separate
 take** (`detectChords`/`isolatedBassPitchClass` in theory.js) -- the

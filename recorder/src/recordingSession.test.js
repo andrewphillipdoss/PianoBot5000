@@ -104,37 +104,36 @@ describe('RecordingSession (chords mode)', () => {
     expect(session.phase).toBe('countIn');
   });
 
-  it('an unrecognizable chord calls onError (not onDone) and drops back to idle, not a stuck "done"', async () => {
-    let error = null;
-    let doneCalled = false;
-    const phases = [];
+  it('an unrecognizable cluster is dropped, not treated as a failed take -- onDone still fires', async () => {
+    let result = null;
+    let errorCalled = false;
     const session = new RecordingSession({
       tempo: FAST_TEMPO,
       mode: 'chords',
-      onPhaseChange: (p) => phases.push(p),
-      onDone: () => {
-        doneCalled = true;
+      onDone: (r) => {
+        result = r;
       },
-      onError: (e) => {
-        error = e;
+      onError: () => {
+        errorCalled = true;
       },
     });
     session.start();
     await wait(80);
     expect(session.phase).toBe('capturing');
 
-    // Two notes a whole step apart isn't a recognizable triad or 7th.
+    // Two notes a whole step apart isn't a recognizable triad or 7th --
+    // dropped as one skipped cluster, same as a stray melody note would
+    // be, rather than failing this (otherwise chord-free) take.
     session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 60, velocity: 90 });
     session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 62, velocity: 90 });
 
     await wait(60); // held well past dropAccidentalTouches' real-time minimum duration (40ms), not just this fake tempo's beat length
     session.stop();
 
-    expect(doneCalled).toBe(false);
-    expect(error).toBeInstanceOf(Error);
-    expect(error.message).toMatch(/couldn't recognize a chord/);
-    expect(session.phase).toBe('idle'); // not stuck on 'done' with no result
-    expect(phases.at(-1)).toBe('idle');
+    expect(errorCalled).toBe(false);
+    expect(result.chords).toEqual([]);
+    expect(result.skippedClusterCount).toBe(1);
+    expect(session.phase).toBe('done');
   });
 });
 

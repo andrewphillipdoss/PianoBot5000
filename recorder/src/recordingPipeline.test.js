@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MELODY_QUANTIZE_STRENGTH, PICKUP_BEATS, processChordsPass, processMelodyPass } from './recordingPipeline.js';
+import { DEFAULT_MELODY_QUANTIZE_STRENGTH, PICKUP_BEATS, processChordsPass, processLinePass } from './recordingPipeline.js';
 
 const TEMPO = 120; // 0.5 seconds per beat -- easy round numbers for test timestamps
 const SPB = 60 / TEMPO;
@@ -15,7 +15,7 @@ describe('processChordsPass', () => {
       { timestamp: 8 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
     // Recording was stopped right as the chord was released -- 8 beats captured, no trailing silence.
-    const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, 8 * SPB);
+    const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 8 * SPB });
 
     expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 8 }]);
     expect(sectionLengthBeats).toBe(16); // 8 real beats rounds up to one 4-bar (16-beat) unit
@@ -37,7 +37,7 @@ describe('processChordsPass', () => {
       { timestamp: 5 * SPB, type: 'noteoff', note: 52, velocity: 0 },
       { timestamp: 5 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
-    const { chords } = processChordsPass(messages, TEMPO, 8 * SPB);
+    const { chords } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 8 * SPB });
     expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 4, end: 5 }]);
   });
 
@@ -57,7 +57,7 @@ describe('processChordsPass', () => {
       { timestamp: 21 * SPB, type: 'noteoff', note: 60, velocity: 0 },
       // ...then the player didn't reach for the spacebar until beat 60 -- 39 beats of dead air.
     ];
-    const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, 60 * SPB);
+    const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 60 * SPB });
 
     expect(chords).toEqual([
       { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 },
@@ -83,7 +83,7 @@ describe('processChordsPass', () => {
       { timestamp: 8 * SPB, type: 'noteoff', note: 52, velocity: 0 },
       { timestamp: 8 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
-    const { chords } = processChordsPass(messages, TEMPO, 8 * SPB);
+    const { chords } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 8 * SPB });
     // One merged entry spanning both bars, not two identical "C" entries.
     expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 8 }]);
   });
@@ -99,7 +99,7 @@ describe('processChordsPass', () => {
       { timestamp: 5 * SPB, type: 'noteoff', note: 52, velocity: 0 },
       { timestamp: 5 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
-    const { chords } = processChordsPass(messages, TEMPO, 8 * SPB, 2); // 2 subdivisions/beat = 8th notes
+    const { chords } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 8 * SPB, subdivisionsPerBeat: 2 }); // 2 subdivisions/beat = 8th notes
     expect(chords[0].start).toBe(4.5); // snaps to the nearest half-beat, not the nearest 16th
   });
 
@@ -124,7 +124,7 @@ describe('processChordsPass', () => {
       { timestamp: 1 * SPB, type: 'noteoff', note: 57, velocity: 0 },
       { timestamp: 1 * SPB, type: 'noteoff', note: 60, velocity: 0 },
     ];
-    const { chords } = processChordsPass(messages, TEMPO, 4 * SPB, 2); // 2 subdivisions/beat = 8th notes
+    const { chords } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 4 * SPB, subdivisionsPerBeat: 2 }); // 2 subdivisions/beat = 8th notes
     expect(chords).toEqual([
       { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 0.5 },
       { rootPitchClass: 5, quality: 'maj', bassPitchClass: 5, start: 0.5, end: 1 },
@@ -143,8 +143,8 @@ describe('processChordsPass', () => {
     // 6 beats captured, no dead air. At 4/4 (default) that rounds up to
     // one 16-beat (4-bar) unit; at 3/4 a "bar" is 3 beats, so a 4-bar
     // unit is 12 beats -- 6 beats should round up to that instead.
-    const default4_4 = processChordsPass(messages, TEMPO, 6 * SPB);
-    const time3_4 = processChordsPass(messages, TEMPO, 6 * SPB, 2, 3);
+    const default4_4 = processChordsPass(messages, TEMPO, { captureDurationSeconds: 6 * SPB });
+    const time3_4 = processChordsPass(messages, TEMPO, { captureDurationSeconds: 6 * SPB, subdivisionsPerBeat: 2, beatsPerBar: 3 });
     expect(default4_4.sectionLengthBeats).toBe(16);
     expect(time3_4.sectionLengthBeats).toBe(12);
   });
@@ -160,7 +160,7 @@ describe('processChordsPass', () => {
       { timestamp: 4 * SPB, type: 'noteoff', note: 52, velocity: 0 },
       { timestamp: 4 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
-    const { chords } = processChordsPass(messages, TEMPO, 4 * SPB);
+    const { chords } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 4 * SPB });
     expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 }]);
   });
 
@@ -175,7 +175,7 @@ describe('processChordsPass', () => {
       { timestamp: 4 * SPB, type: 'noteoff', note: 55, velocity: 0 },
       { timestamp: 4 * SPB, type: 'noteoff', note: 49, velocity: 0 },
     ];
-    const { chords } = processChordsPass(messages, TEMPO, 4 * SPB);
+    const { chords } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 4 * SPB });
     expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 }]);
   });
 
@@ -199,7 +199,7 @@ describe('processChordsPass', () => {
       { timestamp: 12 * SPB, type: 'noteoff', note: 57, velocity: 0 },
       { timestamp: 12 * SPB, type: 'noteoff', note: 60, velocity: 0 },
     ];
-    const { chords, skippedClusterCount } = processChordsPass(messages, TEMPO, 12 * SPB);
+    const { chords, skippedClusterCount } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 12 * SPB });
     expect(chords).toEqual([
       { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 },
       { rootPitchClass: 5, quality: 'maj', bassPitchClass: 5, start: 8, end: 12 },
@@ -216,11 +216,11 @@ describe('processChordsPass', () => {
       { timestamp: 4 * SPB, type: 'noteoff', note: 52, velocity: 0 },
       { timestamp: 4 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
-    expect(processChordsPass(messages, TEMPO, 4 * SPB).skippedClusterCount).toBe(0);
+    expect(processChordsPass(messages, TEMPO, { captureDurationSeconds: 4 * SPB }).skippedClusterCount).toBe(0);
   });
 });
 
-describe('processMelodyPass', () => {
+describe('processLinePass (melody, recorded against an existing section length)', () => {
   // Capturing starts one pickup bar (PICKUP_BEATS) before the chords'
   // own downbeat -- raw message timestamps are relative to that
   // earlier capture start, so "section beat 0" is at PICKUP_BEATS,
@@ -236,7 +236,7 @@ describe('processMelodyPass', () => {
     // Full strength (1) here -- this test is about which grid point a
     // note snaps to, not the default softened feel (see the strength
     // tests below), so it isolates that from the other.
-    const { notes } = processMelodyPass(messages, TEMPO, 16, undefined, 1);
+    const { notes } = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16, quantizeStrength: 1 });
 
     expect(notes[0]).toEqual({ pitch: 60, start: 0, end: 1, velocity: 90 });
     expect(notes[1].start).toBeCloseTo(15.5, 5); // 15.6 snaps to the nearest 16th-note grid point
@@ -248,7 +248,7 @@ describe('processMelodyPass', () => {
       { timestamp: (PICKUP_BEATS + 2.35) * SPB, type: 'noteon', note: 67, velocity: 90 },
       { timestamp: (PICKUP_BEATS + 3) * SPB, type: 'noteoff', note: 67, velocity: 0 },
     ];
-    const { notes } = processMelodyPass(messages, TEMPO, 16, 8, 1); // 8 subdivisions/beat = 32nd notes, full strength
+    const { notes } = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16, subdivisionsPerBeat: 8, quantizeStrength: 1 }); // 8 subdivisions/beat = 32nd notes, full strength
     // 2.35 snaps to 2.375, the nearest 1/8-beat (32nd-note) grid point --
     // with the default 16th-note grid it would instead snap to 2.25.
     expect(notes[0].start).toBeCloseTo(2.375, 5);
@@ -259,7 +259,7 @@ describe('processMelodyPass', () => {
       { timestamp: (PICKUP_BEATS + 16) * SPB, type: 'noteon', note: 60, velocity: 90 },
       { timestamp: (PICKUP_BEATS + 16.5) * SPB, type: 'noteoff', note: 60, velocity: 0 },
     ];
-    const { notes } = processMelodyPass(messages, TEMPO, 16);
+    const { notes } = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16 });
     expect(notes).toEqual([]);
   });
 
@@ -268,7 +268,7 @@ describe('processMelodyPass', () => {
       { timestamp: (PICKUP_BEATS + 15.9) * SPB, type: 'noteon', note: 60, velocity: 90 }, // quantizes to exactly beat 16...
       { timestamp: (PICKUP_BEATS + 17) * SPB, type: 'noteoff', note: 60, velocity: 0 }, // ...so clipping start==end==16
     ];
-    const { notes } = processMelodyPass(messages, TEMPO, 16, undefined, 1); // full strength -- see the note on the test above
+    const { notes } = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16, quantizeStrength: 1 }); // full strength -- see the note on the test above
     expect(notes).toEqual([]);
   });
 
@@ -277,7 +277,7 @@ describe('processMelodyPass', () => {
       { timestamp: 0, type: 'noteon', note: 67, velocity: 90 }, // right at the top of the pickup bar
       { timestamp: (PICKUP_BEATS - 1) * SPB, type: 'noteoff', note: 67, velocity: 0 }, // released a beat before the downbeat
     ];
-    const { notes } = processMelodyPass(messages, TEMPO, 16);
+    const { notes } = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16 });
     expect(notes).toEqual([{ pitch: 67, start: -PICKUP_BEATS, end: -1, velocity: 90 }]);
   });
 
@@ -286,7 +286,7 @@ describe('processMelodyPass', () => {
     // capture end (the pickup bar plus the full section), which then
     // clips to the section boundary same as any other still-held note.
     const messages = [{ timestamp: (PICKUP_BEATS - 0.5) * SPB, type: 'noteon', note: 67, velocity: 90 }];
-    const { notes } = processMelodyPass(messages, TEMPO, 16);
+    const { notes } = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16 });
     expect(notes).toEqual([{ pitch: 67, start: -0.5, end: 16, velocity: 90 }]);
   });
 
@@ -296,7 +296,7 @@ describe('processMelodyPass', () => {
       { timestamp: (PICKUP_BEATS + 2.35) * SPB, type: 'noteon', note: 67, velocity: 90 },
       { timestamp: (PICKUP_BEATS + 3) * SPB, type: 'noteoff', note: 67, velocity: 0 },
     ];
-    const { notes } = processMelodyPass(messages, TEMPO, 16); // default subdivisions + default (softened) strength
+    const { notes } = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16 }); // default subdivisions + default (softened) strength
     expect(notes[0].start).not.toBeCloseTo(2.25, 5); // did not fully snap...
     expect(notes[0].start).not.toBeCloseTo(2.35, 5); // ...but isn't untouched raw timing either
     expect(notes[0].start).toBeCloseTo(2.35 + (2.25 - 2.35) * DEFAULT_MELODY_QUANTIZE_STRENGTH, 5);
@@ -307,8 +307,8 @@ describe('processMelodyPass', () => {
       { timestamp: (PICKUP_BEATS + 2.35) * SPB, type: 'noteon', note: 67, velocity: 90 },
       { timestamp: (PICKUP_BEATS + 3) * SPB, type: 'noteoff', note: 67, velocity: 0 },
     ];
-    const full = processMelodyPass(messages, TEMPO, 16, 4, 1);
-    const none = processMelodyPass(messages, TEMPO, 16, 4, 0);
+    const full = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16, subdivisionsPerBeat: 4, quantizeStrength: 1 });
+    const none = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16, subdivisionsPerBeat: 4, quantizeStrength: 0 });
     expect(full.notes[0].start).toBeCloseTo(2.25, 5);
     expect(none.notes[0].start).toBeCloseTo(2.35, 5);
   });
@@ -321,7 +321,7 @@ describe('processMelodyPass', () => {
       { timestamp: (PICKUP_BEATS + 1) * SPB, type: 'noteon', note: 64, velocity: 90 },
       { timestamp: (PICKUP_BEATS + 2) * SPB, type: 'noteoff', note: 64, velocity: 0 },
     ];
-    const { notes } = processMelodyPass(messages, TEMPO, 16, 4, 1); // full strength -- isolates this from the softened-snap tests above
+    const { notes } = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16, subdivisionsPerBeat: 4, quantizeStrength: 1 }); // full strength -- isolates this from the softened-snap tests above
     expect(notes).toEqual([
       { pitch: 60, start: 0, end: 1, velocity: 90 }, // clipped to pitch 64's start, not left overlapping it
       { pitch: 64, start: 1, end: 2, velocity: 90 },
@@ -333,7 +333,68 @@ describe('processMelodyPass', () => {
       { timestamp: 0, type: 'noteon', note: 60, velocity: 90 }, // right at the very start of capture -- no pickup bar to land in
       { timestamp: 1 * SPB, type: 'noteoff', note: 60, velocity: 0 },
     ];
-    const { notes } = processMelodyPass(messages, TEMPO, 16, 4, 1, 0); // pickupBeats = 0
+    const { notes } = processLinePass('melody', messages, TEMPO, { sectionLengthBeats: 16, subdivisionsPerBeat: 4, quantizeStrength: 1, pickupBeats: 0 }); // pickupBeats = 0
     expect(notes).toEqual([{ pitch: 60, start: 0, end: 1, velocity: 90 }]); // beat 0 -- not shifted negative the way a pickup note would be
+  });
+});
+
+describe('processLinePass (a take that sets the section length)', () => {
+  it('lets melody be recorded first -- no pickup, length from trimmed onsets rounded to 4 bars', () => {
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 72, velocity: 90 }, // right on the downbeat -- no pickup bar to land in
+      { timestamp: 1 * SPB, type: 'noteoff', note: 72, velocity: 0 },
+      { timestamp: 20 * SPB, type: 'noteon', note: 74, velocity: 90 }, // bar 5
+      { timestamp: 21 * SPB, type: 'noteoff', note: 74, velocity: 0 },
+      // ...then dead air until the player stopped, at beat 40.
+    ];
+    const { notes, sectionLengthBeats } = processLinePass('melody', messages, TEMPO, { captureDurationSeconds: 40 * SPB, quantizeStrength: 1 });
+    expect(notes.map((n) => n.start)).toEqual([0, 20]);
+    expect(sectionLengthBeats).toBe(32); // bars 0-5 kept (24 beats), rounded to the nearest 16
+  });
+
+  it('pulls the top line out of melody played over chords', () => {
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 48, velocity: 80 }, // C3 E3 G3 accompaniment...
+      { timestamp: 0, type: 'noteon', note: 52, velocity: 80 },
+      { timestamp: 0, type: 'noteon', note: 55, velocity: 80 },
+      { timestamp: 0.01, type: 'noteon', note: 76, velocity: 95 }, // ...with the melody (E5) on top
+      { timestamp: 2 * SPB, type: 'noteoff', note: 76, velocity: 0 },
+      { timestamp: 2 * SPB, type: 'noteon', note: 74, velocity: 95 }, // D5, chords still held underneath
+      { timestamp: 4 * SPB, type: 'noteoff', note: 74, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 48, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 52, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 55, velocity: 0 },
+    ];
+    const { notes } = processLinePass('melody', messages, TEMPO, { captureDurationSeconds: 4 * SPB, quantizeStrength: 1 });
+    expect(notes.map((n) => n.pitch)).toEqual([76, 74]);
+  });
+
+  it('pulls the bass line out of a take with both hands playing', () => {
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 36, velocity: 90 }, // C2 bass...
+      { timestamp: 0, type: 'noteon', note: 64, velocity: 80 }, // ...under a right-hand chord
+      { timestamp: 0, type: 'noteon', note: 67, velocity: 80 },
+      { timestamp: 2 * SPB, type: 'noteoff', note: 36, velocity: 0 },
+      { timestamp: 2 * SPB, type: 'noteon', note: 43, velocity: 90 }, // G2
+      { timestamp: 4 * SPB, type: 'noteoff', note: 43, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 64, velocity: 0 },
+      { timestamp: 4 * SPB, type: 'noteoff', note: 67, velocity: 0 },
+    ];
+    const { notes } = processLinePass('bassline', messages, TEMPO, { captureDurationSeconds: 4 * SPB, quantizeStrength: 1 });
+    expect(notes.map((n) => n.pitch)).toEqual([36, 43]);
+  });
+});
+
+describe('processChordsPass (recorded against an existing section length)', () => {
+  it('keeps the given length and clips a chord held past it', () => {
+    const messages = [
+      { timestamp: 0, type: 'noteon', note: 48, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 52, velocity: 90 },
+      { timestamp: 0, type: 'noteon', note: 55, velocity: 90 },
+      // never released -- closes at the capture boundary (the section end)
+    ];
+    const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, { sectionLengthBeats: 8 });
+    expect(sectionLengthBeats).toBe(8);
+    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 8 }]);
   });
 });

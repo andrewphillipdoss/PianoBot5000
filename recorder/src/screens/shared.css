@@ -249,42 +249,88 @@
   font-weight: 600;
 }
 
-/* Chord bar grid (the "Chord Chart" view -- notation rendering is a separate, later piece) */
+/* Chord Chart: a lead-sheet style measure grid (see ChordChart.jsx /
+   chordChartLayout.js). Every measure the same width, four to a line
+   (two on a narrow screen) -- the grid reflows on its own, since the
+   measures are one flat list. */
+.measure-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  row-gap: 14px;
+  /* The barline overlap below (margin-right: -1.5px) would otherwise
+     poke past the panel's right edge on the last column. */
+  padding-right: 1.5px;
+}
 
-/* One row per chordChartLayout.js row -- each already capped at maxBarsPerRow bars' worth. */
-.chord-chart-rows {
+@media (max-width: 640px) {
+  .measure-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.measure {
+  position: relative;
+  height: 72px;
+  /* A barline on both sides, overlapping the neighbour's by its own
+     width -- so every line of the chart opens *and* closes with one,
+     however the grid happens to wrap. */
+  border-left: 1.5px solid var(--ink);
+  border-right: 1.5px solid var(--ink);
+  margin-right: -1.5px;
+  background: var(--bg);
+}
+
+.measure--final {
+  border-right: 5px double var(--ink);
+}
+
+.measure__number {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  font-size: 10px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.measure__beat-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 9px;
+  background: var(--line);
+}
+
+.measure__segment {
+  position: absolute;
+  top: 17px;
+  bottom: 6px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
 }
 
-.chord-bar-row {
-  display: flex;
-  flex-wrap: wrap;
-  /* A safety net, not the primary layout mechanism: chordChartLayout.js
-     caps each row by bar count assuming there's enough pixel width to
-     go around, but a row with many short chords can still hit every
-     bar's min-width floor (below) before it runs out of bars -- e.g. a
-     dozen+ quick changes packed into one 8-bar row. Without wrapping,
-     that overflowed the panel instead of degrading gracefully onto a
-     second visual line. */
-  gap: 10px;
-}
-
-.chord-bar {
-  /* Width comes from chordBarWidthStyle (a % of a full row's capacity,
-     not flexGrow) so bar width reads consistently across rows -- shrink
-     only, never grow past that. box-sizing keeps the gap/border/padding
-     from pushing a full row over 100%. */
-  flex: 0 1 auto;
-  box-sizing: border-box;
-  min-width: 32px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 14px 8px;
-  text-align: center;
+.measure__label {
+  padding: 0 4px 0 7px;
   font-family: 'Fraunces', Georgia, serif;
   font-weight: 600;
-  font-size: 18px;
+  font-size: 17px;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* How long the chord lasts, drawn under its name; a fainter one where
+   it's held on from an earlier measure. */
+.measure__band {
+  margin: auto 3px 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.measure__band--held {
+  opacity: 0.25;
 }

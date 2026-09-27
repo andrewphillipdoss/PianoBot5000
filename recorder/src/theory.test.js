@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BASS_CEILING_MIDI,
   clipOverlappingNotes,
   clusterOnsets,
   describeChordTones,
   detectChordQuality,
   detectChords,
   dropAccidentalTouches,
+  extractBassLine,
+  extractTopLine,
   formatChordSymbol,
   mergeConsecutiveChords,
   messagesToNotes,
@@ -432,8 +435,10 @@ describe('detectChords', () => {
     expect(chord.bassPitchClass).toBe(0); // still C -- no slash
   });
 
-  it('reads an inversion (bass note is one of the chord\'s own tones) as a slash chord', () => {
-    // E3-G3-C4 -- 1st inversion of C major, read as C/E.
+  it('does NOT read an inversion as a slash chord -- it\'s still the same chord, just voiced differently', () => {
+    // E3-G3-C4 -- 1st inversion of C major. The bass note (E) is one of
+    // the chord's own tones, not a foreign note borrowed from elsewhere,
+    // so this reads as plain "C", not "C/E".
     const notes = [
       { pitch: 52, start: 0, end: 4 }, // E3
       { pitch: 55, start: 0, end: 4 }, // G3
@@ -442,11 +447,11 @@ describe('detectChords', () => {
     const [chord] = detectChords(notes, 0.05);
     expect(chord.rootPitchClass).toBe(0);
     expect(chord.quality).toBe('maj');
-    expect(chord.bassPitchClass).toBe(4); // E -- C/E
+    expect(chord.bassPitchClass).toBe(0); // still just "C" -- no slash
   });
 
-  it('reads a 2nd inversion the same way', () => {
-    // G3-C4-E4 -- 2nd inversion of C major, read as C/G.
+  it('does the same for a 2nd inversion', () => {
+    // G3-C4-E4 -- 2nd inversion of C major -- still plain "C", not "C/G".
     const notes = [
       { pitch: 55, start: 0, end: 4 }, // G3
       { pitch: 60, start: 0, end: 4 }, // C4
@@ -454,7 +459,7 @@ describe('detectChords', () => {
     ];
     const [chord] = detectChords(notes, 0.05);
     expect(chord.rootPitchClass).toBe(0);
-    expect(chord.bassPitchClass).toBe(7); // G -- C/G
+    expect(chord.bassPitchClass).toBe(0); // still just "C" -- no slash
   });
 
   it('reads a foreign bass note (not one of the chord\'s own tones) as a slash chord', () => {
@@ -529,6 +534,153 @@ describe('detectChords', () => {
     ];
     expect(detectChords(notes, 0.05)).toEqual([]);
   });
+
+  describe('denoising (one slipped note)', () => {
+    it('drops a semitone slip struck along with a triad and still reads the triad', () => {
+      const notes = [
+        { pitch: 48, start: 0, end: 4, velocity: 90 }, // C3
+        { pitch: 49, start: 0, end: 4, velocity: 90 }, // C#3 -- slipped finger
+        { pitch: 52, start: 0, end: 4, velocity: 90 }, // E3
+        { pitch: 55, start: 0, end: 4, velocity: 90 }, // G3
+      ];
+      // Not "C#dim/C": C# sits a semitone off the bass, far too crowded to
+      // be a deliberate foreign bass note, and the bass is never the one
+      // assumed to have slipped when another reading works.
+      const [chord] = detectChords(notes, 0.05);
+      expect(chord).toMatchObject({ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0 });
+    });
+
+    it('drops a stray note struck with the chord in a far-off register', () => {
+      const notes = [
+        { pitch: 48, start: 0, end: 4, velocity: 90 }, // C3
+        { pitch: 52, start: 0, end: 4, velocity: 90 }, // E3
+        { pitch: 55, start: 0, end: 4, velocity: 90 }, // G3
+        { pitch: 78, start: 0, end: 4, velocity: 90 }, // F#5 -- stray hit
+      ];
+      const [chord] = detectChords(notes, 0.05);
+      expect(chord).toMatchObject({ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0 });
+    });
+
+    it('prefers dropping the softer note when two different drops would each leave a valid chord', () => {
+      // C-D-E-G: dropping D leaves C major, dropping E leaves Csus2 -- the
+      // glancing (soft) D is the slip.
+      const notes = [
+        { pitch: 48, start: 0, end: 4, velocity: 90 }, // C3
+        { pitch: 50, start: 0, end: 4, velocity: 25 }, // D3 -- soft brush
+        { pitch: 52, start: 0, end: 4, velocity: 90 }, // E3
+        { pitch: 55, start: 0, end: 4, velocity: 90 }, // G3
+      ];
+      const [chord] = detectChords(notes, 0.05);
+      expect(chord).toMatchObject({ rootPitchClass: 0, quality: 'maj' });
+    });
+
+    it('leaves a genuinely ambiguous cluster unrecognized rather than guessing', () => {
+      // Same C-D-E-G, but nothing distinguishes D from E as the slip.
+      const notes = [
+        { pitch: 48, start: 0, end: 4, velocity: 90 },
+        { pitch: 50, start: 0, end: 4, velocity: 90 },
+        { pitch: 52, start: 0, end: 4, velocity: 90 },
+        { pitch: 55, start: 0, end: 4, velocity: 90 },
+      ];
+      expect(detectChords(notes, 0.05)).toEqual([]);
+    });
+
+    it("doesn't let a slip's own timing stretch the chord", () => {
+      const notes = [
+        { pitch: 48, start: 0, end: 2, velocity: 90 },
+        { pitch: 52, start: 0, end: 2, velocity: 90 },
+        { pitch: 55, start: 0, end: 2, velocity: 90 },
+        { pitch: 78, start: 0, end: 6, velocity: 90 }, // stray note left held way longer
+      ];
+      const [chord] = detectChords(notes, 0.05);
+      expect(chord.end).toBe(2);
+    });
+
+    it('does not read a doubled bass note plus a slip as a slash chord', () => {
+      // C3 E3 G3 C4 + C#4: C recurs above the bass, so it's a chord tone,
+      // never a foreign bass -- the C# is the slip.
+      const notes = [
+        { pitch: 48, start: 0, end: 4, velocity: 90 },
+        { pitch: 52, start: 0, end: 4, velocity: 90 },
+        { pitch: 55, start: 0, end: 4, velocity: 90 },
+        { pitch: 60, start: 0, end: 4, velocity: 90 },
+        { pitch: 61, start: 0, end: 4, velocity: 90 },
+      ];
+      const [chord] = detectChords(notes, 0.05);
+      expect(chord).toMatchObject({ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0 });
+    });
+  });
+});
+
+describe('extractTopLine', () => {
+  it('keeps only the highest note of notes struck together', () => {
+    const notes = [
+      { pitch: 60, start: 0, end: 1 }, // C4
+      { pitch: 64, start: 0.01, end: 1 }, // E4
+      { pitch: 72, start: 0.02, end: 1 }, // C5 -- the melody note
+    ];
+    expect(extractTopLine(notes).map((n) => n.pitch)).toEqual([72]);
+  });
+
+  it('ignores accompaniment moving underneath a held melody note', () => {
+    const notes = [
+      { pitch: 76, start: 0, end: 2 }, // E5 held
+      { pitch: 60, start: 0.5, end: 1 }, // C4 underneath
+      { pitch: 64, start: 1, end: 1.5 }, // E4 underneath
+      { pitch: 74, start: 2, end: 3 }, // D5 -- next melody note
+    ];
+    expect(extractTopLine(notes).map((n) => n.pitch)).toEqual([76, 74]);
+  });
+
+  it('keeps a descending legato line whose notes overlap slightly', () => {
+    const notes = [
+      { pitch: 72, start: 0, end: 0.54 }, // released 40ms after the next onset
+      { pitch: 71, start: 0.5, end: 1.04 },
+      { pitch: 69, start: 1, end: 1.5 },
+    ];
+    expect(extractTopLine(notes).map((n) => n.pitch)).toEqual([72, 71, 69]);
+  });
+});
+
+describe('extractBassLine', () => {
+  it('reads a single low note as the bass', () => {
+    expect(extractBassLine([{ pitch: 36, start: 0, end: 1 }]).map((n) => n.pitch)).toEqual([36]);
+  });
+
+  it('reads an octave as one bass note, the lower of the two', () => {
+    const notes = [
+      { pitch: 36, start: 0, end: 1 }, // C2
+      { pitch: 48, start: 0.01, end: 1 }, // C3
+    ];
+    expect(extractBassLine(notes).map((n) => n.pitch)).toEqual([36]);
+  });
+
+  it('falls back to the lowest note of a chord, when it sits in the bass register', () => {
+    const notes = [
+      { pitch: 43, start: 0, end: 1 }, // G2
+      { pitch: 59, start: 0, end: 1 },
+      { pitch: 62, start: 0, end: 1 },
+    ];
+    expect(extractBassLine(notes).map((n) => n.pitch)).toEqual([43]);
+  });
+
+  it('takes nothing from a moment whose lowest note is above the bass register', () => {
+    const notes = [
+      { pitch: BASS_CEILING_MIDI + 4, start: 0, end: 1 },
+      { pitch: BASS_CEILING_MIDI + 7, start: 0, end: 1 },
+    ];
+    expect(extractBassLine(notes)).toEqual([]);
+  });
+
+  it('keeps a held bass note from being replaced by a chord struck above it', () => {
+    const notes = [
+      { pitch: 36, start: 0, end: 2 }, // C2 held
+      { pitch: 55, start: 0.5, end: 1 }, // G3 -- a chord's bottom note, still in range
+      { pitch: 59, start: 0.5, end: 1 },
+      { pitch: 38, start: 2, end: 3 }, // D2 -- next bass note
+    ];
+    expect(extractBassLine(notes).map((n) => n.pitch)).toEqual([36, 38]);
+  });
 });
 
 describe('mergeConsecutiveChords', () => {
@@ -562,12 +714,15 @@ describe('mergeConsecutiveChords', () => {
   });
 
   it('treats a bass note change as a real change even when root+quality stay the same', () => {
-    // A walking bass under a held C major -- C, then C/E, then C/G --
-    // is exactly what slash notation exists to show, not a repeat.
+    // A walking (foreign) bass under a held C major -- C, then C/D, then
+    // C/F -- is exactly what slash notation exists to show, not a
+    // repeat. (An inversion, e.g. C/E, wouldn't produce a different
+    // bassPitchClass at all -- see detectChords -- so it isn't a useful
+    // example here; this tests genuine foreign-bass slash chords.)
     const chords = [
       { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 }, // C
-      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 4, start: 4, end: 8 }, // C/E
-      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 7, start: 8, end: 12 }, // C/G
+      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 2, start: 4, end: 8 }, // C/D
+      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 5, start: 8, end: 12 }, // C/F
     ];
     expect(mergeConsecutiveChords(chords)).toEqual(chords);
   });

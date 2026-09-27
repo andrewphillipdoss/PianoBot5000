@@ -44,7 +44,7 @@ function LibraryOnboarding({ status, onChooseFolder, onReconnect }) {
 export default function App() {
   const [screen, setScreen] = useState('songs');
   const [selectedSong, setSelectedSong] = useState(null);
-  const [editSession, setEditSession] = useState(null); // { mode, chartData, sectionIndex } while adding a section to / re-recording part of the currently-viewed song
+  const [editSession, setEditSession] = useState(null); // { mode, chartData, sectionIndex } while adding a section to / editing a section of the currently-viewed song
   const library = useSongLibrary();
 
   return (
@@ -87,16 +87,8 @@ export default function App() {
               setEditSession({ mode: 'addSection', chartData });
               setScreen('editSong');
             }}
-            onReRecordChords={(chartData, sectionIndex) => {
-              setEditSession({ mode: 'reRecordChords', chartData, sectionIndex });
-              setScreen('editSong');
-            }}
-            onReRecordMelody={(chartData, sectionIndex) => {
-              setEditSession({ mode: 'reRecordMelody', chartData, sectionIndex });
-              setScreen('editSong');
-            }}
-            onReRecordBassline={(chartData, sectionIndex) => {
-              setEditSession({ mode: 'reRecordBassline', chartData, sectionIndex });
+            onEditSection={(chartData, sectionIndex) => {
+              setEditSession({ mode: 'editSection', chartData, sectionIndex });
               setScreen('editSong');
             }}
             onDelete={async () => {

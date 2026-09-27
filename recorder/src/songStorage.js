@@ -12,7 +12,13 @@
  * faked directory handle, not unit tested).
  */
 
-import { DEFAULT_BEATS_PER_BAR, DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT, DEFAULT_MELODY_QUANTIZE_STRENGTH, DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT } from './recordingPipeline.js';
+import {
+  DEFAULT_BEATS_PER_BAR,
+  DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
+  DEFAULT_MELODY_QUANTIZE_STRENGTH,
+  DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
+  DEFAULT_METRONOME_SUBDIVISIONS_PER_BEAT,
+} from './recordingPipeline.js';
 import { formatChordSymbol, parseChordSymbol, quantizeBeat } from './theory.js';
 
 // ---------------------------------------------------------------------------
@@ -43,16 +49,18 @@ export function chartFileName(title) {
  * (how hard melody notes snap to that grid), `melodyPickupBeats`
  * (how much lead-in melody capture gives a pickup note before the
  * chords enter -- 0 skips the pickup bar entirely; see
- * recordingPipeline.js), and the equivalent `hasBassline`/
- * `basslineFirst`/`bassline*` settings for the optional bassline pass
- * (see RecordBassline.jsx) aren't part of the legacy CLI's own chart
+ * recordingPipeline.js), and the equivalent `bassline*` settings
+ * aren't part of the legacy CLI's own chart
  * format, but the legacy reader ignores unknown top-level keys, so
  * they round-trip harmlessly here: re-recording an already-saved song
  * reads them back out and keeps using the same settings it was
  * originally recorded with, rather than silently resetting to the
  * default. `melodyPickupBeats`/`basslinePickupBeats` default to a full
  * bar of *whatever* `beatsPerBar` is, not a fixed 4, since a bar's own
- * length depends on the time signature.
+ * length depends on the time signature. `metronomeSubdivisionsPerBeat`
+ * (1 or 2 -- quarter or eighth notes) is a song-level setting like
+ * `beatsPerBar`, not a per-pass one -- it's how the recording click
+ * feels to play along with, the same on every record screen.
  */
 export function emptyChartData({
   title,
@@ -63,26 +71,26 @@ export function emptyChartData({
   melodyQuantization = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
   melodyQuantizeStrength = DEFAULT_MELODY_QUANTIZE_STRENGTH,
   melodyPickupBeats = beatsPerBar,
-  hasBassline = false,
-  basslineFirst = false,
   basslineQuantization = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
   basslineQuantizeStrength = DEFAULT_MELODY_QUANTIZE_STRENGTH,
   basslinePickupBeats = beatsPerBar,
+  metronomeSubdivisionsPerBeat = DEFAULT_METRONOME_SUBDIVISIONS_PER_BEAT,
 }) {
   return {
     title, key, tempo, beatsPerBar,
     chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats,
-    hasBassline, basslineFirst, basslineQuantization, basslineQuantizeStrength, basslinePickupBeats,
+    basslineQuantization, basslineQuantizeStrength, basslinePickupBeats,
+    metronomeSubdivisionsPerBeat,
     sections: [], chords: [], melody: [], bassline: [],
   };
 }
 
 /**
- * Read a chart's quantization/bassline settings back out, tolerating a
+ * Read a chart's quantization/recording settings back out, tolerating a
  * chart saved before chords/melody had separate settings (a single
  * `quantization` field, applied to both), before `melodyQuantizeStrength`/
- * `melodyPickupBeats` existed at all, or before the bassline pass
- * existed at all -- falls back through those, then to the current
+ * `melodyPickupBeats` existed at all, or before basslines existed at
+ * all -- falls back through those, then to the current
  * defaults, so an old file never throws or silently loses its own
  * recorded settings. `melodyPickupBeats`/`basslinePickupBeats` fall
  * back to a full bar of the chart's own `beatsPerBar` (itself
@@ -96,11 +104,10 @@ export function readChartQuantization(chartData) {
     melodyQuantization: chartData.melodyQuantization ?? chartData.quantization ?? DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
     melodyQuantizeStrength: chartData.melodyQuantizeStrength ?? DEFAULT_MELODY_QUANTIZE_STRENGTH,
     melodyPickupBeats: chartData.melodyPickupBeats ?? beatsPerBar,
-    hasBassline: chartData.hasBassline ?? false,
-    basslineFirst: chartData.basslineFirst ?? false,
     basslineQuantization: chartData.basslineQuantization ?? DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
     basslineQuantizeStrength: chartData.basslineQuantizeStrength ?? DEFAULT_MELODY_QUANTIZE_STRENGTH,
     basslinePickupBeats: chartData.basslinePickupBeats ?? beatsPerBar,
+    metronomeSubdivisionsPerBeat: chartData.metronomeSubdivisionsPerBeat ?? DEFAULT_METRONOME_SUBDIVISIONS_PER_BEAT,
   };
 }
 
@@ -172,7 +179,7 @@ export function buildChartData({ title, key, tempo, chordsQuantization, melodyQu
  * pickup note (which lands *before* its own section's start_beat --
  * see appendSectionData) is still attributed to the section it was
  * actually played into rather than the one before it. Chords have no
- * such pickup concept (only a melody pass has a pickup bar), so a
+ * such pickup concept (only a melody or bassline take has a pickup bar), so a
  * chord's range is never widened -- widening it too would misattribute
  * a chord genuinely in section i-1's own last bar to section i instead,
  * since a chord entry has no tag to fall back *from* in an older chart.
@@ -198,19 +205,19 @@ export function entrySectionLabel(entry, sections) {
 
 /**
  * Convert one already-saved section's on-disk chords back into the
- * internal ChordEvent shape `appendSectionData`/RecordMelody expect --
- * the reverse of what building a chart does. Needed for "re-record
- * just the melody," which keeps the existing chords/length and only
- * replaces the melody, so those chords have to come back out in a
- * form the recording flow can play back and re-save.
+ * internal ChordEvent shape `appendSectionData` and the section hub
+ * expect -- the reverse of what building a chart does. Needed to edit
+ * a saved section: whatever parts aren't re-recorded have to come back
+ * out in a form the recording flow can play back and re-save.
  */
 export function sectionChordsAsInternal(chartData, section) {
   return chartData.chords
     .filter((c) => entrySectionLabel(c, chartData.sections) === section.label)
     .map((c) => {
       const parsed = parseChordSymbol(c.chord);
-      return { ...parsed, start: c.beat - section.start_beat, end: c.beat + c.duration_beats - section.start_beat };
-    });
+      return parsed && { ...parsed, start: c.beat - section.start_beat, end: c.beat + c.duration_beats - section.start_beat };
+    })
+    .filter(Boolean); // an unparseable symbol (e.g. a hand-edited chart file) is dropped, not passed on half-formed
 }
 
 function sectionNotesAsInternal(entries, chartData, section) {
@@ -221,8 +228,8 @@ function sectionNotesAsInternal(entries, chartData, section) {
 
 /**
  * Same idea as `sectionChordsAsInternal`, for melody/bassline notes --
- * needed whenever one of the three passes (chords/melody/bassline) is
- * re-recorded on its own and the *other* two need to be carried
+ * needed whenever one of a section's three parts (chords/melody/
+ * bassline) is re-recorded on its own and the others need to be carried
  * forward unchanged into `replaceSectionData` rather than lost (there's
  * no raw MIDI left for anything not actually being re-recorded right
  * now, so this is the only way to get their already-captured notes
@@ -232,7 +239,7 @@ export function sectionMelodyAsInternal(chartData, section) {
   return sectionNotesAsInternal(chartData.melody, chartData, section);
 }
 
-/** Same as `sectionMelodyAsInternal`, for the optional bassline track (absent entirely on a chart that never had one). */
+/** Same as `sectionMelodyAsInternal`, for the bassline (absent entirely on a chart saved before basslines existed). */
 export function sectionBasslineAsInternal(chartData, section) {
   return sectionNotesAsInternal(chartData.bassline ?? [], chartData, section);
 }
@@ -311,9 +318,9 @@ export function replaceSectionData(chartData, sectionIndex, { sectionLengthBeats
 /**
  * Re-snap every already-saved chord/melody entry onto a new
  * quantization grid, for a song whose raw MIDI is long gone (recording
- * is the only point that's ever available -- see ChordsReview.jsx/
- * SectionComplete.jsx for the from-raw-MIDI version used right after a
- * take, while it still is). This can only ever re-round each entry's
+ * is the only point that's ever available -- see RecordSongFlow.jsx
+ * for the from-raw-MIDI version used right after a take, while it still
+ * is). This can only ever re-round each entry's
  * own already-quantized `beat`/`duration_beats`, never re-recognize
  * anything -- so, same as those two screens, it can't fail, just
  * shift boundaries to the new grid (with the same "never round a note

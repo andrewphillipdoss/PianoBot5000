@@ -5,8 +5,8 @@
  * is unit-testable without a browser or a real keyboard, same spirit as
  * pianobot5000's own theory.py (this is a JS port of the pieces the
  * recorder specifically needs: chord recognition in reverse, light
- * quantization, and the "chords pass is authoritative" bar-trimming
- * rule -- not the arranger's voicing/comping logic, which stays
+ * quantization, and the "first take sets the section's length"
+ * bar-trimming rule -- not the arranger's voicing/comping logic, which stays
  * server-side in the existing Python CLI).
  */
 
@@ -255,83 +255,160 @@ export function clusterOnsets(notes, thresholdBeats = 0.15) {
   return clusters;
 }
 
+// A deliberate bass note stands apart from the voicing above it -- more
+// than a whole step below it. Anything closer is crowded against the
+// chord, which is what a slipped finger looks like, not a bass line.
+const FOREIGN_BASS_MIN_GAP_SEMITONES = 3;
+
 /**
- * The pitch class of the note(s) at the very bottom of a cluster, if
- * they're distinguishable as their own "bass note" group -- a single
- * low note, or that same note doubled an octave (or several) up,
- * exactly what a player's left hand plays as a bass note under a chord
- * voiced above it. Concretely: every note from the bottom that shares
- * the lowest note's own pitch class, with nothing of a *different*
- * pitch class below the first note that isn't. Returns null only if
- * the whole cluster is a single pitch class (which isn't a chord at
- * all, so `detectChords` below never actually gets there).
- *
- * This says nothing yet about whether that note is slash-worthy --
- * only that it's *structurally* separate from whatever's played above
- * it. A plain root-position chord (bass note = the chord's own root,
- * doubled or not) passes through this exactly the same way a real
- * slash chord does; `detectChords` decides slash-worthiness by
- * comparing this against the chord's actual detected root afterward.
+ * The pitch class of the bottom note(s) of a cluster, if they read as
+ * a deliberate bass note *foreign* to the voicing above: a single low
+ * note (or that note doubled an octave or more up) that sits at least
+ * FOREIGN_BASS_MIN_GAP_SEMITONES below everything else and doesn't
+ * recur anywhere in the voicing above it (if it did, it'd be one of the
+ * chord's own tones -- an inversion, not a slash chord). Null otherwise.
  */
-function isolatedBassPitchClass(sortedPitches) {
+function foreignBassPitchClass(sortedPitches) {
   const lowPitchClass = sortedPitches[0] % 12;
   let i = 1;
   while (i < sortedPitches.length && sortedPitches[i] % 12 === lowPitchClass) i++;
-  return i < sortedPitches.length ? lowPitchClass : null;
+  if (i === sortedPitches.length) return null;
+  const upper = sortedPitches.slice(i);
+  if (upper[0] - sortedPitches[i - 1] < FOREIGN_BASS_MIN_GAP_SEMITONES) return null;
+  if (upper.some((p) => p % 12 === lowPitchClass)) return null;
+  return lowPitchClass;
+}
+
+function spanOf(notes) {
+  return { start: Math.min(...notes.map((n) => n.start)), end: Math.max(...notes.map((n) => n.end)) };
+}
+
+// Most slip-like first: a slip is rarely the bottom note (the bass is
+// the most deliberate note a hand plays), and it's usually a glancing
+// blow -- softer and shorter than the notes actually meant.
+function compareSlipLikeness(a, b) {
+  return a.includesLowest - b.includesLowest || a.velocity - b.velocity || a.duration - b.duration;
 }
 
 /**
- * Turn a captured left-hand (chords) take into ChordEvents. A cluster
- * whose pitch classes don't form a recognizable chord shape (see
- * `detectChordQuality`) -- a single stray note from an accidental
- * melodic run mixed into the take, an incomplete voicing, whatever --
- * is dropped rather than kept as a guess, but does NOT fail the whole
- * take: every other, genuinely recognizable cluster is still returned.
- * One bad cluster costing an entire otherwise-good take (re-recording
- * every real chord in it just to fix one moment) is worse than a small
- * gap in the chart at that one spot; `processChordsPass` in
- * recordingPipeline.js surfaces how many clusters were skipped this
- * way, for the UI to mention without blocking on it.
- *
- * `bassPitchClass` on the result names the isolated bass note (see
- * above) whenever the cluster has one -- `formatChordSymbol` shows it
- * as a slash chord only when it differs from the detected root, so a
- * plain root-position voicing (by far the common case) is unaffected.
- * Two whole-cluster shapes are recognized:
- *   - The bass note *is* one of the chord's own tones, just voiced
- *     lowest (a genuine inversion, e.g. E-G-C read as C/E) or simply
- *     doubled under a root-position chord (no slash, same as always)
- *     -- the combined pitch-class set alone already spells a known
- *     triad/7th, so this is tried first and covers both.
- *   - The bass note is *foreign* to the chord above it entirely (e.g.
- *     a C triad over a D bass, common in hymns/pop) -- the combined
- *     set doesn't spell anything recognizable, but the notes *above*
- *     the isolated bass, on their own, might.
+ * The denoising step: if removing exactly one pitch class from a
+ * cluster (a slipped finger, a stray note struck along with the chord)
+ * leaves a recognizable chord one size down, that note was noise. When
+ * more than one removal works, the most slip-like one wins (see
+ * compareSlipLikeness); a genuine tie stays unrecognized rather than
+ * guessed at. Returns { match, kept } or null.
  */
-export function detectChords(notes, thresholdBeats = 0.15) {
-  const chords = [];
-  for (const cluster of clusterOnsets(notes, thresholdBeats)) {
-    const pitches = cluster.map((n) => n.pitch).sort((a, b) => a - b);
-    const pitchClasses = cluster.map((n) => n.pitch % 12);
-    const isolatedBass = isolatedBassPitchClass(pitches);
+function matchWithoutOneSlip(cluster) {
+  const distinct = [...new Set(cluster.map((n) => n.pitch % 12))];
+  if (distinct.length < 4) return null;
+  const lowest = Math.min(...cluster.map((n) => n.pitch));
 
-    let detected = detectChordQuality(pitchClasses, pitches[0] % 12);
-    if (!detected && isolatedBass !== null) {
-      const upperPitchClasses = [...new Set(pitches.filter((p) => p % 12 !== isolatedBass).map((p) => p % 12))];
-      detected = detectChordQuality(upperPitchClasses);
-    }
-
-    if (!detected) continue; // not a recognizable shape -- skip this one cluster, keep the rest of the take
-
-    chords.push({
-      rootPitchClass: detected.rootPitchClass,
-      quality: detected.quality,
-      bassPitchClass: isolatedBass ?? detected.rootPitchClass,
-      start: Math.min(...cluster.map((n) => n.start)),
-      end: Math.max(...cluster.map((n) => n.end)),
+  const candidates = [];
+  for (const pitchClass of distinct) {
+    const kept = cluster.filter((n) => n.pitch % 12 !== pitchClass);
+    const keptLowest = Math.min(...kept.map((n) => n.pitch));
+    const match = detectChordQuality(kept.map((n) => n.pitch % 12), keptLowest % 12);
+    if (!match) continue;
+    const dropped = cluster.filter((n) => n.pitch % 12 === pitchClass);
+    candidates.push({
+      match,
+      kept,
+      includesLowest: dropped.some((n) => n.pitch === lowest) ? 1 : 0,
+      velocity: Math.max(...dropped.map((n) => n.velocity ?? 0)),
+      duration: Math.max(...dropped.map((n) => n.end - n.start)),
     });
   }
-  return chords;
+
+  candidates.sort(compareSlipLikeness);
+  if (candidates.length === 0) return null;
+  if (candidates.length > 1 && compareSlipLikeness(candidates[0], candidates[1]) === 0) return null;
+  return candidates[0];
+}
+
+/**
+ * One struck cluster -> a ChordEvent, or null if it can't be made sense
+ * of. Three readings, most literal first:
+ *   1. The whole cluster spells a known chord. Covers inversions and
+ *      doubled roots too -- those are the same chord, just voiced
+ *      differently, so they're never shown as slash chords.
+ *   2. A foreign bass note under a known chord (e.g. a C triad over a
+ *      D, written `C/D`) -- see foreignBassPitchClass for what counts.
+ *   3. A known chord with one slipped note in it -- see
+ *      matchWithoutOneSlip. The slip is dropped entirely: no slash, and
+ *      its timing doesn't stretch the chord's own span either.
+ */
+function recognizeCluster(cluster) {
+  const pitches = cluster.map((n) => n.pitch).sort((a, b) => a - b);
+
+  const whole = detectChordQuality(cluster.map((n) => n.pitch % 12), pitches[0] % 12);
+  if (whole) return { rootPitchClass: whole.rootPitchClass, quality: whole.quality, bassPitchClass: whole.rootPitchClass, ...spanOf(cluster) };
+
+  const foreignBass = foreignBassPitchClass(pitches);
+  if (foreignBass !== null) {
+    const upper = detectChordQuality(pitches.filter((p) => p % 12 !== foreignBass).map((p) => p % 12));
+    if (upper) return { rootPitchClass: upper.rootPitchClass, quality: upper.quality, bassPitchClass: foreignBass, ...spanOf(cluster) };
+  }
+
+  const denoised = matchWithoutOneSlip(cluster);
+  if (denoised) {
+    const { rootPitchClass, quality } = denoised.match;
+    return { rootPitchClass, quality, bassPitchClass: rootPitchClass, ...spanOf(denoised.kept) };
+  }
+
+  return null;
+}
+
+/**
+ * Turn a captured chords take into ChordEvents, one per struck cluster
+ * (see recognizeCluster). A cluster that can't be made sense of even
+ * after denoising -- a lone stray note between chords, a real hand
+ * splat -- is dropped, but never fails the whole take: every other
+ * recognizable cluster is still returned. `processChordsPass` in
+ * recordingPipeline.js reports how many were dropped this way.
+ */
+export function detectChords(notes, thresholdBeats = 0.15) {
+  return clusterOnsets(notes, thresholdBeats).map(recognizeCluster).filter(Boolean);
+}
+
+// Notes struck within this long of each other are one moment, not two
+// -- a hand's natural spread when playing several notes "together".
+const SIMULTANEOUS_ONSET_SECONDS = 0.05;
+// A legato line hands off note to note with a little overlap; a note
+// only masks a later one if it keeps sounding well past that.
+const LEGATO_OVERLAP_SECONDS = 0.1;
+// The top of the bass register -- middle C and below.
+export const BASS_CEILING_MIDI = 60;
+
+function extractOuterLine(notes, isMoreOuter, isEligible = () => true) {
+  const candidates = clusterOnsets(notes, SIMULTANEOUS_ONSET_SECONDS)
+    .map((moment) => moment.reduce((best, n) => (isMoreOuter(n.pitch, best.pitch) ? n : best)))
+    .filter(isEligible);
+  return candidates.filter(
+    (c) => !notes.some((o) => o.start < c.start && o.end > c.start + LEGATO_OVERLAP_SECONDS && isMoreOuter(o.pitch, c.pitch))
+  );
+}
+
+/**
+ * The melody line of a take (NoteEvents, times in seconds): the highest
+ * note of each struck moment, unless a still-higher note is already
+ * sounding over it (a held melody note with accompaniment moving
+ * underneath). Anything played below the melody just falls away, so a
+ * melody take can include harmony or accompaniment without polluting it.
+ */
+export function extractTopLine(notes) {
+  return extractOuterLine(notes, (a, b) => a > b);
+}
+
+/**
+ * The bass line of a take -- the mirror of extractTopLine: the lowest
+ * note of each struck moment (a single low note, or an octave, is the
+ * clean case; a full chord contributes its bottom note), unless a
+ * still-lower note is already sounding under it. Only notes at or
+ * below BASS_CEILING_MIDI count at all -- a moment whose lowest note
+ * sits above the bass register contributes nothing.
+ */
+export function extractBassLine(notes) {
+  return extractOuterLine(notes, (a, b) => a < b, (n) => n.pitch <= BASS_CEILING_MIDI);
 }
 
 /**
@@ -391,8 +468,8 @@ const DEFAULT_VOICING_BASE_MIDI = 48; // C3
  * A plain close-position voicing (root, third, fifth[, seventh]) for
  * a detected chord -- not the arranger's voice-leading logic (that
  * chooses inversions to minimize movement between chords), just
- * enough to make a recorded chord audible when it plays back during
- * the melody pass. `bassPitchClass`, when given and different from
+ * enough to make a recorded chord audible when it plays back under
+ * another part's take, or in song playback. `bassPitchClass`, when given and different from
  * the root (a slash chord), adds one more note a full octave below
  * `baseOctaveMidi` -- below every other note in the voicing, exactly
  * where a real bass note belongs -- rather than trying to fold it into

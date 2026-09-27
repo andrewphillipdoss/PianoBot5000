@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { useSongPlayback } from '../hooks/useSongPlayback.js';
+import { PARTS } from '../parts.js';
+import { clipToSectionLength, processTake } from '../recordingPipeline.js';
 import {
   appendSectionData,
   emptyChartData,
@@ -10,145 +13,210 @@ import {
   sectionChordsAsInternal,
   sectionMelodyAsInternal,
 } from '../songStorage.js';
-import ChordsReview from './ChordsReview.jsx';
-import RecordBassline from './RecordBassline.jsx';
-import RecordChords from './RecordChords.jsx';
-import RecordMelody from './RecordMelody.jsx';
-import SectionComplete from './SectionComplete.jsx';
+import RecordPart from './RecordPart.jsx';
+import SectionHub from './SectionHub.jsx';
 import SongSetup from './SongSetup.jsx';
 
+const EMPTY_SECTION = { sectionLengthBeats: null, parts: { chords: null, melody: null, bassline: null } };
+
+/** A finished take (RecordingSession's result) -> what the section keeps of it. */
+function takeFromResult(result) {
+  return {
+    events: result.part === 'chords' ? result.chords : result.notes,
+    skippedClusterCount: result.skippedClusterCount ?? 0,
+    // Everything needed to re-derive this exact take later at a new
+    // quantization (or, for a lone first take, a corrected tempo)
+    // without re-recording it.
+    rawMessages: result.rawMessages,
+    captureDurationSeconds: result.captureDurationSeconds,
+    pickupBeats: result.pickupBeats,
+    setsLength: result.setsLength,
+    recordedLengthBeats: result.sectionLengthBeats,
+  };
+}
+
+/** Re-run a take's own raw MIDI through the pipeline -- same take, new tempo/grid/strength. */
+function rederiveTake(part, take, { tempo, settings, beatsPerBar }) {
+  const result = processTake(part, take.rawMessages, tempo, {
+    captureDurationSeconds: take.captureDurationSeconds,
+    sectionLengthBeats: take.setsLength ? null : take.recordedLengthBeats,
+    subdivisionsPerBeat: settings[`${part}Quantization`],
+    quantizeStrength: settings[`${part}QuantizeStrength`],
+    pickupBeats: take.pickupBeats,
+    beatsPerBar,
+  });
+  return {
+    ...take,
+    events: part === 'chords' ? result.chords : result.notes,
+    skippedClusterCount: result.skippedClusterCount ?? 0,
+    recordedLengthBeats: result.sectionLengthBeats,
+  };
+}
+
+/** An already-saved section, as the hub's starting point -- its parts have no raw MIDI left, only their events. */
+function sectionFromChart(chartData, sectionIndex) {
+  const section = chartData.sections[sectionIndex];
+  const saved = (events) => (events.length > 0 ? { events, rawMessages: null, skippedClusterCount: 0 } : null);
+  return {
+    sectionLengthBeats: section.end_beat - section.start_beat,
+    parts: {
+      chords: saved(sectionChordsAsInternal(chartData, section)),
+      melody: saved(sectionMelodyAsInternal(chartData, section)),
+      bassline: saved(sectionBasslineAsInternal(chartData, section)),
+    },
+  };
+}
+
+function hasAnyTake(section) {
+  return PARTS.some((part) => section.parts[part]);
+}
+
+/** One part's events as they'll actually be kept -- cut to the section's (possibly since-adjusted) length. */
+function partEvents(section, part) {
+  const events = section.parts[part]?.events ?? [];
+  return section.sectionLengthBeats === null ? events : clipToSectionLength(events, section.sectionLengthBeats);
+}
+
+/** The section in the shape songStorage.js's appendSectionData/replaceSectionData take. */
+function sectionForSave(section) {
+  return {
+    sectionLengthBeats: section.sectionLengthBeats,
+    chords: partEvents(section, 'chords'),
+    melody: partEvents(section, 'melody'),
+    bassline: partEvents(section, 'bassline'),
+  };
+}
+
 /**
- * The whole record-a-song wizard: setup once (skipped when adding to
- * or editing an existing song), then chords -> review -> melody ->
- * section complete -> either "Add Another Section" (loop back for the
- * next one) or save. One component owns all of it (rather than a
- * router) because this genuinely is a linear, guided flow, not free
- * navigation between independent pages.
+ * The whole record-a-song flow: song setup once (skipped when adding to
+ * or editing an existing song), then each section's hub (SectionHub.jsx)
+ * -- Chords, Melody and Bassline, recorded in any order, as many times
+ * as it takes -- then either "Add Another Section" (a fresh hub for the
+ * next one) or save.
  *
- * Five modes, all going through the exact same screens:
- *   newSong          - baseChartData is null; starts at setup; each
- *                       finished section builds up from an empty chart.
- *   addSection       - baseChartData is an already-saved song; starts
- *                       recording its next section (skips setup); builds
- *                       up from that existing chart instead of empty.
- *   reRecordChords   - re-records `sectionIndex`'s chords (and, same as
- *                       this always required live, its melody -- and
- *                       bassline, if the song has one -- too: a chord
- *                       re-take can change the section's length, which
- *                       invalidates anything recorded against the old
- *                       one). Replaces that section in the existing
- *                       chart rather than appending; every later section
- *                       shifts to absorb any length change (see
- *                       songStorage.js's replaceSectionData).
- *   reRecordMelody   - re-records just `sectionIndex`'s melody, keeping
- *                       its existing chords/length *and bassline*
- *                       (unaffected by a melody-only re-take) -- skips
- *                       straight to the melody screen.
- *   reRecordBassline - re-records just `sectionIndex`'s bassline,
- *                       keeping its existing chords *and melody* --
- *                       skips straight to the bassline screen. Only
- *                       ever offered for a song that has one at all.
+ * Three modes:
+ *   newSong     - baseChartData is null; starts at setup; each finished
+ *                 section builds up from an empty chart.
+ *   addSection  - baseChartData is an already-saved song; starts at a
+ *                 fresh hub for its next section.
+ *   editSection - opens `sectionIndex` of an already-saved song in its
+ *                 hub, with its saved parts already in place. Any part
+ *                 can be re-recorded, cleared or added; saving replaces
+ *                 just that section (every later section shifts to
+ *                 absorb a length change -- see songStorage.js's
+ *                 replaceSectionData).
  *
- * `sectionIndex` (required in the three re-record modes) picks which
- * section is being replaced -- any section, not just the last one; see
- * songStorage.js's replaceSectionData/entrySectionLabel for how that's
- * done unambiguously even for a section in the middle of the chart.
+ * The rule that makes "any order" work is one line: a take sets the
+ * section's length only when there's nothing else in the section yet
+ * (see recordingPipeline.js). So whichever part comes first -- or comes
+ * back first after everything else was cleared -- decides it, and every
+ * other take plays along with what's there.
  *
- * The bassline pass itself is optional per song (`song.hasBassline`,
- * set at SongSetup) and, when present, can be ordered either before or
- * after the melody pass (`song.basslineFirst`) -- see RecordBassline.jsx
- * for why that ordering is the only real choice available (the chords
- * pass stays authoritative for the section's length either way).
- *
- * Chords/melody/bassline quantization -- and tempo -- are tracked here
- * (not fixed at song setup, see SongSetup.jsx) so they can be changed on
- * the record screens themselves and in every mode, re-record included;
- * a chart read back for addSection/re-record keeps using whatever
- * grid/tempo it was last recorded at (readChartQuantization tolerates
- * an older chart's single shared `quantization` field too). Tempo is
- * changeable up through ChordsReview (where it can still re-derive the
- * chords pass from raw MIDI at the new BPM) but not past it -- see
- * SectionComplete.jsx's docstring for why that's a deliberate boundary,
- * not an oversight.
+ * Tempo is tracked here, not fixed at setup, so it can change on the
+ * record screen and the hub. Chart data is stored in beats, so changing
+ * it only changes playback speed -- except when the section's single
+ * take is the one that set its length, and still has its raw MIDI: then
+ * it's re-derived at the new tempo (correcting a tempo typed wrong at
+ * setup, without re-recording), length included. With more than one
+ * take recorded, they're already synchronized with each other in beats,
+ * and re-deriving any of them would pull it out of step with the rest.
  */
 export default function RecordSongFlow({ mode = 'newSong', baseChartData = null, sectionIndex = null, onCancel, onSaved, saveSong }) {
-  const isReplacing = mode === 'reRecordChords' || mode === 'reRecordMelody' || mode === 'reRecordBassline';
-  const targetSection = isReplacing ? baseChartData.sections[sectionIndex] : null;
+  const isEditing = mode === 'editSection';
 
   const [song, setSong] = useState(() =>
-    baseChartData
-      ? {
-          title: baseChartData.title,
-          key: baseChartData.key,
-          tempo: baseChartData.tempo,
-          beatsPerBar: readChartBeatsPerBar(baseChartData),
-          hasBassline: readChartQuantization(baseChartData).hasBassline,
-          basslineFirst: readChartQuantization(baseChartData).basslineFirst,
-        }
-      : null
+    baseChartData ? { title: baseChartData.title, key: baseChartData.key, tempo: baseChartData.tempo, beatsPerBar: readChartBeatsPerBar(baseChartData) } : null
   );
-  const [
-    { chordsQuantization, melodyQuantization, melodyQuantizeStrength, melodyPickupBeats, basslineQuantization, basslineQuantizeStrength, basslinePickupBeats },
-    setQuantization,
-  ] = useState(() => (baseChartData ? readChartQuantization(baseChartData) : readChartQuantization({})));
-  const [screen, setScreen] = useState(
-    mode === 'newSong' ? 'setup' : mode === 'reRecordMelody' ? 'recordMelody' : mode === 'reRecordBassline' ? 'recordBassline' : 'recordChords'
-  );
-  const [chordsResult, setChordsResult] = useState(() =>
-    mode === 'reRecordMelody' || mode === 'reRecordBassline'
-      ? { chords: sectionChordsAsInternal(baseChartData, targetSection), sectionLengthBeats: targetSection.end_beat - targetSection.start_beat }
-      : null
-  );
-  const [melodyResult, setMelodyResult] = useState(() =>
-    mode === 'reRecordBassline' ? { notes: sectionMelodyAsInternal(baseChartData, targetSection) } : null // preserved unchanged -- only bassline is being re-taken
-  );
-  const [basslineResult, setBasslineResult] = useState(() =>
-    mode === 'reRecordMelody' && song?.hasBassline ? { notes: sectionBasslineAsInternal(baseChartData, targetSection) } : null // preserved unchanged -- only melody is being re-taken
-  );
+  const [settings, setSettings] = useState(() => readChartQuantization(baseChartData ?? {}));
+  const [screen, setScreen] = useState(mode === 'newSong' ? 'setup' : 'hub');
+  const [recordingPart, setRecordingPart] = useState(null);
+  const [section, setSection] = useState(() => (isEditing ? sectionFromChart(baseChartData, sectionIndex) : EMPTY_SECTION));
   // Sections finished earlier *this session* (via "Add Another
   // Section") but not yet folded into the saved chart -- only ever
-  // grows in newSong/addSection modes; re-record modes replace
-  // exactly one section and save immediately.
+  // grows in newSong/addSection modes.
   const [completedSections, setCompletedSections] = useState([]);
+  const playback = useSongPlayback();
 
-  const sectionLabel = isReplacing ? targetSection.label : nextSectionLabel((baseChartData?.sections.length ?? 0) + completedSections.length);
-  // Whether *this* recording session still needs a fresh bassline take
-  // at some point -- true for every mode except reRecordMelody (which
-  // preserves the existing bassline untouched) and reRecordChords/
-  // newSong/addSection once one's already been captured this session.
-  const needsFreshBassline = Boolean(song?.hasBassline) && mode !== 'reRecordMelody';
+  const sectionLabel = isEditing ? baseChartData.sections[sectionIndex].label : nextSectionLabel((baseChartData?.sections.length ?? 0) + completedSections.length);
+  const hasFreshWork = completedSections.length > 0 || PARTS.some((part) => section.parts[part]?.rawMessages);
 
-  function handleTempoChange(value) {
-    setSong((s) => ({ ...s, tempo: value }));
+  function handleTempoChange(tempo) {
+    setSong((s) => ({ ...s, tempo }));
+    const takes = PARTS.filter((part) => section.parts[part]);
+    const [onlyPart] = takes;
+    const onlyTake = section.parts[onlyPart];
+    if (takes.length === 1 && onlyTake.setsLength && onlyTake.rawMessages) {
+      const rederived = rederiveTake(onlyPart, onlyTake, { tempo, settings, beatsPerBar: song.beatsPerBar });
+      setSection({ sectionLengthBeats: rederived.recordedLengthBeats, parts: { ...section.parts, [onlyPart]: rederived } });
+    }
   }
 
-  async function finalize({ melody: finalMelodyNotes, bassline: finalBasslineNotes }) {
-    const thisSection = {
-      sectionLengthBeats: chordsResult.sectionLengthBeats,
-      chords: chordsResult.chords,
-      melody: finalMelodyNotes,
-      bassline: finalBasslineNotes,
-    };
-    let chartData = isReplacing
+  function handleSettingChange(part, partial) {
+    const nextSettings = { ...settings, ...partial };
+    setSettings(nextSettings);
+    const take = section.parts[part];
+    if (take?.rawMessages) {
+      // The section keeps its length (it may have been adjusted by hand
+      // since) -- only this part's events are re-derived.
+      const rederived = rederiveTake(part, take, { tempo: song.tempo, settings: nextSettings, beatsPerBar: song.beatsPerBar });
+      setSection((s) => ({ ...s, parts: { ...s.parts, [part]: rederived } }));
+    }
+  }
+
+  function handleClear(part) {
+    setSection((s) => {
+      const parts = { ...s.parts, [part]: null };
+      // Nothing left to play against -- the next take sets the length afresh.
+      return { parts, sectionLengthBeats: PARTS.some((p) => parts[p]) ? s.sectionLengthBeats : null };
+    });
+  }
+
+  function handleLengthChange(deltaBeats) {
+    setSection((s) => ({ ...s, sectionLengthBeats: Math.max(song.beatsPerBar, s.sectionLengthBeats + deltaBeats) }));
+  }
+
+  function handleTakeDone(result) {
+    setSection((s) => ({
+      sectionLengthBeats: result.setsLength ? result.sectionLengthBeats : s.sectionLengthBeats,
+      parts: { ...s.parts, [result.part]: takeFromResult(result) },
+    }));
+    setScreen('hub');
+  }
+
+  function handlePlaySection() {
+    const preview = appendSectionData(emptyChartData({ title: song.title, key: song.key, tempo: song.tempo, beatsPerBar: song.beatsPerBar }), {
+      sectionLabel,
+      ...sectionForSave(section),
+    });
+    playback.play(preview);
+  }
+
+  function handleBack() {
+    playback.stop();
+    if (mode === 'newSong' && completedSections.length === 0) {
+      setScreen('setup'); // this section's takes stay put -- see SongSetup's `initial`
+      return;
+    }
+    if (hasFreshWork && !window.confirm("Leave without saving? What you've recorded here will be lost.")) return;
+    onCancel();
+  }
+
+  async function finalize() {
+    playback.stop();
+    const thisSection = hasAnyTake(section) ? sectionForSave(section) : null;
+    let chartData = isEditing
       ? replaceSectionData(baseChartData, sectionIndex, thisSection)
-      : [...completedSections, { sectionLabel, ...thisSection }].reduce(
-          (acc, section) => appendSectionData(acc, section),
-          baseChartData ?? emptyChartData({ title: song.title, key: song.key, tempo: song.tempo, hasBassline: song.hasBassline, basslineFirst: song.basslineFirst })
+      : [...completedSections, ...(thisSection ? [{ sectionLabel, ...thisSection }] : [])].reduce(
+          (acc, s) => appendSectionData(acc, s),
+          baseChartData ?? emptyChartData({ title: song.title, key: song.key, tempo: song.tempo })
         );
-    chartData = {
-      ...chartData,
-      tempo: song.tempo,
-      beatsPerBar: song.beatsPerBar,
-      chordsQuantization,
-      melodyQuantization,
-      melodyQuantizeStrength,
-      melodyPickupBeats,
-      hasBassline: song.hasBassline,
-      basslineFirst: song.basslineFirst,
-      basslineQuantization,
-      basslineQuantizeStrength,
-      basslinePickupBeats,
-    }; // whatever settings were actually used for this session, even if they differ from what the chart started with
+    // Whatever settings were actually used this session, even if they
+    // differ from what the chart started with.
+    chartData = { ...chartData, tempo: song.tempo, beatsPerBar: song.beatsPerBar, ...settings };
+    // Left over from before every section offered all three parts --
+    // whether a song has a bassline is now just whether one was recorded.
+    delete chartData.hasBassline;
+    delete chartData.basslineFirst;
     const savedSummary = await saveSong(chartData);
     onSaved(savedSummary);
   }
@@ -160,178 +228,82 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
         onBack={onCancel}
         onSubmit={(submittedSong) => {
           setSong(submittedSong);
-          setScreen('recordChords');
+          setScreen('hub');
         }}
       />
     );
   }
 
-  if (screen === 'recordChords') {
+  if (screen === 'record') {
+    const part = recordingPart;
+    const isLine = part !== 'chords';
+    const pickupKey = `${part}PickupBeats`;
+    const backing = Object.fromEntries(PARTS.filter((p) => p !== part).map((p) => [p, partEvents(section, p)]));
     return (
-      <RecordChords
-        // useRecordingSession only ever reads tempo/subdivisionsPerBeat/
-        // beatsPerBar once, at construction (see its own docstring) --
-        // without a key, changing one of these on this idle screen would
-        // update the *displayed* value here and in the saved chart, but
-        // silently leave the actual upcoming take using whatever was set
-        // when this screen first mounted. Keying on all three forces a
-        // fresh mount (and a fresh RecordingSession) the moment any of
-        // them changes, while the player is still on the idle screen.
-        key={`${chordsQuantization}-${song.tempo}-${song.beatsPerBar}`}
+      <RecordPart
+        // useRecordingSession only ever reads these once, at construction
+        // (see its docstring) -- keying on all of them forces a fresh
+        // mount (and a fresh RecordingSession) the moment any changes,
+        // rather than the take silently using the old value.
+        key={`${part}-${settings[`${part}Quantization`]}-${settings[`${part}QuantizeStrength`]}-${settings[pickupKey]}-${song.tempo}-${song.beatsPerBar}-${settings.metronomeSubdivisionsPerBeat}`}
+        part={part}
         title={song.title}
         sectionLabel={sectionLabel}
         tempo={song.tempo}
         onTempoChange={handleTempoChange}
-        subdivisionsPerBeat={chordsQuantization}
-        onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, chordsQuantization: value }))}
+        subdivisionsPerBeat={settings[`${part}Quantization`]}
+        onSubdivisionsPerBeatChange={(value) => setSettings((s) => ({ ...s, [`${part}Quantization`]: value }))}
+        quantizeStrength={isLine ? settings[`${part}QuantizeStrength`] : undefined}
+        onQuantizeStrengthChange={(value) => setSettings((s) => ({ ...s, [`${part}QuantizeStrength`]: value }))}
+        hasPickupBar={isLine && settings[pickupKey] > 0}
+        onHasPickupBarChange={(checked) => setSettings((s) => ({ ...s, [pickupKey]: checked ? song.beatsPerBar : 0 }))}
+        pickupBeats={isLine ? settings[pickupKey] : 0}
         beatsPerBar={song.beatsPerBar}
-        onBack={mode === 'newSong' && completedSections.length === 0 ? () => setScreen('setup') : onCancel}
-        onDone={(result) => {
-          setChordsResult(result);
-          setScreen('chordsReview');
-        }}
+        metronomeSubdivisionsPerBeat={settings.metronomeSubdivisionsPerBeat}
+        onMetronomeSubdivisionsPerBeatChange={(value) => setSettings((s) => ({ ...s, metronomeSubdivisionsPerBeat: value }))}
+        sectionLengthBeats={section.sectionLengthBeats}
+        backing={backing}
+        onBack={() => setScreen('hub')}
+        onDone={handleTakeDone}
       />
     );
   }
 
-  if (screen === 'chordsReview') {
-    return (
-      <ChordsReview
-        title={song.title}
-        sectionLabel={sectionLabel}
-        tempo={song.tempo}
-        onTempoChange={handleTempoChange}
-        keySignature={song.key}
-        chordsResult={chordsResult}
-        subdivisionsPerBeat={chordsQuantization}
-        onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, chordsQuantization: value }))}
-        beatsPerBar={song.beatsPerBar}
-        onReRecord={() => {
-          setChordsResult(null);
-          setScreen('recordChords');
-        }}
-        onProceed={({ chords, sectionLengthBeats }) => {
-          setChordsResult({ ...chordsResult, chords, sectionLengthBeats });
-          setScreen(needsFreshBassline && song.basslineFirst ? 'recordBassline' : 'recordMelody');
-        }}
-      />
-    );
-  }
-
-  if (screen === 'recordBassline') {
-    return (
-      <RecordBassline
-        // Same reasoning as RecordChords'/RecordMelody's own key above.
-        key={`${basslineQuantization}-${basslineQuantizeStrength}-${basslinePickupBeats}-${song.tempo}-${song.beatsPerBar}`}
-        title={song.title}
-        sectionLabel={sectionLabel}
-        tempo={song.tempo}
-        onTempoChange={handleTempoChange}
-        subdivisionsPerBeat={basslineQuantization}
-        onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, basslineQuantization: value }))}
-        quantizeStrength={basslineQuantizeStrength}
-        onQuantizeStrengthChange={(value) => setQuantization((q) => ({ ...q, basslineQuantizeStrength: value }))}
-        hasPickupBar={basslinePickupBeats > 0}
-        onHasPickupBarChange={(checked) => setQuantization((q) => ({ ...q, basslinePickupBeats: checked ? song.beatsPerBar : 0 }))}
-        pickupBeats={basslinePickupBeats}
-        beatsPerBar={song.beatsPerBar}
-        chordsResult={chordsResult}
-        onBack={mode === 'reRecordBassline' ? onCancel : () => setScreen('chordsReview')}
-        onDone={(result) => {
-          setBasslineResult(result);
-          // Reached before melody (basslineFirst) -> melody's still ahead;
-          // reached via reRecordBassline -> melody was already preserved
-          // (melodyResult set from the start) -- either way, "melody
-          // already done" is exactly the signal for which one's next.
-          setScreen(melodyResult ? 'sectionComplete' : 'recordMelody');
-        }}
-      />
-    );
-  }
-
-  if (screen === 'recordMelody') {
-    return (
-      <RecordMelody
-        // Same reasoning as RecordChords' key above -- useRecordingSession
-        // only reads these once, at construction.
-        key={`${melodyQuantization}-${melodyQuantizeStrength}-${melodyPickupBeats}-${song.tempo}-${song.beatsPerBar}`}
-        title={song.title}
-        sectionLabel={sectionLabel}
-        tempo={song.tempo}
-        onTempoChange={handleTempoChange}
-        subdivisionsPerBeat={melodyQuantization}
-        onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, melodyQuantization: value }))}
-        quantizeStrength={melodyQuantizeStrength}
-        onQuantizeStrengthChange={(value) => setQuantization((q) => ({ ...q, melodyQuantizeStrength: value }))}
-        hasPickupBar={melodyPickupBeats > 0}
-        onHasPickupBarChange={(checked) => setQuantization((q) => ({ ...q, melodyPickupBeats: checked ? song.beatsPerBar : 0 }))}
-        pickupBeats={melodyPickupBeats}
-        beatsPerBar={song.beatsPerBar}
-        chordsResult={chordsResult}
-        onBack={mode === 'reRecordMelody' ? onCancel : () => setScreen('chordsReview')}
-        onDone={(result) => {
-          setMelodyResult(result);
-          // basslineResult is already set by now if this song records
-          // bassline *before* melody (or if it's being preserved
-          // unchanged) -- only actually still null when a fresh
-          // bassline take genuinely comes next.
-          setScreen(needsFreshBassline && basslineResult === null ? 'recordBassline' : 'sectionComplete');
-        }}
-      />
-    );
-  }
-
-  // screen === 'sectionComplete'
+  // screen === 'hub'
   return (
-    <SectionComplete
+    <SectionHub
       title={song.title}
       sectionLabel={sectionLabel}
-      tempo={song.tempo}
       keySignature={song.key}
-      chordsResult={chordsResult}
-      melodyResult={melodyResult}
-      subdivisionsPerBeat={melodyQuantization}
-      onSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, melodyQuantization: value }))}
-      quantizeStrength={melodyQuantizeStrength}
-      onQuantizeStrengthChange={(value) => setQuantization((q) => ({ ...q, melodyQuantizeStrength: value }))}
-      pickupBeats={melodyPickupBeats}
-      basslineResult={basslineResult}
-      basslineSubdivisionsPerBeat={basslineQuantization}
-      onBasslineSubdivisionsPerBeatChange={(value) => setQuantization((q) => ({ ...q, basslineQuantization: value }))}
-      basslineQuantizeStrength={basslineQuantizeStrength}
-      onBasslineQuantizeStrengthChange={(value) => setQuantization((q) => ({ ...q, basslineQuantizeStrength: value }))}
-      basslinePickupBeats={basslinePickupBeats}
+      tempo={song.tempo}
+      onTempoChange={handleTempoChange}
       beatsPerBar={song.beatsPerBar}
-      finalizeLabel={mode === 'newSong' || mode === 'addSection' ? 'Finalize Song' : 'Save Changes'}
-      onReRecordChords={
-        mode === 'reRecordMelody' || mode === 'reRecordBassline'
-          ? undefined // these modes never touched chords -- re-recording them would need the chordsReview/length-adjust step they skipped
-          : () => {
-              setChordsResult(null);
-              setMelodyResult(null); // recorded against the old chords' length/playback -- invalidated too
-              setBasslineResult(null); // same reasoning, if this song has one
-              setScreen('recordChords');
-            }
-      }
-      onReRecordMelody={() => {
-        setMelodyResult(null);
-        setScreen('recordMelody');
+      section={section}
+      settings={settings}
+      onSettingChange={handleSettingChange}
+      isPlaying={playback.isPlaying}
+      onPlay={handlePlaySection}
+      onStopPlayback={playback.stop}
+      onRecord={(part) => {
+        playback.stop();
+        setRecordingPart(part);
+        setScreen('record');
       }}
-      onReRecordBassline={() => {
-        setBasslineResult(null);
-        setScreen('recordBassline');
-      }}
+      onClear={handleClear}
+      onLengthChange={handleLengthChange}
+      backLabel={mode === 'newSong' && completedSections.length === 0 ? 'Song setup' : 'Cancel'}
+      onBack={handleBack}
       onAddSection={
-        isReplacing
-          ? undefined // re-record modes replace exactly one section and save -- add a section as its own, separate action afterward
-          : ({ melody, bassline }) => {
-              setCompletedSections((prev) => [...prev, { sectionLabel, sectionLengthBeats: chordsResult.sectionLengthBeats, chords: chordsResult.chords, melody, bassline }]);
-              setChordsResult(null);
-              setMelodyResult(null);
-              setBasslineResult(null);
-              setScreen('recordChords');
+        isEditing
+          ? undefined // editing replaces exactly one section -- add a section as its own action from the song view
+          : () => {
+              playback.stop();
+              setCompletedSections((prev) => [...prev, { sectionLabel, ...sectionForSave(section) }]);
+              setSection(EMPTY_SECTION);
             }
       }
+      finalizeLabel={mode === 'newSong' ? 'Finalize Song' : 'Save Changes'}
+      canFinalize={hasAnyTake(section) || completedSections.length > 0}
       onFinalize={finalize}
     />
   );

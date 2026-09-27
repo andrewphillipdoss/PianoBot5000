@@ -42,7 +42,7 @@ function readPersistedOutputId() {
  * output, and `subscribe` are reachable via `useMidi()` from any
  * screen, not just the ones that happen to record or play something
  * -- e.g. a future "practice along" mode on SongView needs exactly the
- * same live input stream RecordChords/RecordMelody already get.
+ * same live input stream RecordPart already gets.
  *
  * `selectedInputId`/`selectedOutputId` are persisted to localStorage
  * so they survive a reload too, not just navigation within one

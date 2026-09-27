@@ -11,6 +11,8 @@ import {
   clusterOnsets,
   detectChords,
   dropAccidentalTouches,
+  extractBassLine,
+  extractTopLine,
   mergeConsecutiveChords,
   messagesToNotes,
   quantizeBeat,
@@ -23,18 +25,19 @@ import {
 export const DEFAULT_BEATS_PER_BAR = 4; // a plain quarter-note beat per the time signature's numerator -- 3 for 3/4, 4 for 4/4, etc. (compound meters like 6/8 aren't modeled separately; pick the beat count that reads naturally)
 export const BEATS_PER_BAR = DEFAULT_BEATS_PER_BAR; // kept as the fallback default throughout this file/its callers for a song that doesn't say otherwise
 
-// One bar of lead-in captured before the chords start playing back
-// during a melody pass, so pickup/anacrusis notes have somewhere to
-// go. Capturing already starts right when the count-in ends (see
-// recordingSession.js's _beginCapturing) -- this is what that gap is
-// *for*, rather than the chords entering immediately. Notes played in
-// it come back with a *negative* beat position (see processMelodyPass
+// One bar of lead-in captured before the section's downbeat during a
+// melody or bassline take (against an existing length), so
+// pickup/anacrusis notes have somewhere to go. Capturing already starts
+// right when the count-in ends (see recordingSession.js's
+// _beginCapturing) -- this is what that gap is *for*, rather than the
+// section entering immediately. Notes played in
+// it come back with a *negative* beat position (see processLinePass
 // below), same as how a pickup measure is normally counted relative
 // to the downbeat it leads into.
 export const PICKUP_BEATS = BEATS_PER_BAR;
 
 // How finely notes are snapped to the beat grid for display -- chosen
-// per-song at setup (8th/16th/32nd; see SongSetup.jsx), these defaults
+// on the record screen and section hub (quarter/8th/16th/32nd), these defaults
 // if a caller doesn't say. Chords and melody default *differently*:
 // chord changes are rarely faster than an 8th note and a coarser grid
 // reads cleaner on the chord chart, while a melody line wants the
@@ -57,6 +60,14 @@ export const DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT = 4;
 // exactly on the grid (a clean chart) than from preserving hand-timing.
 export const DEFAULT_MELODY_QUANTIZE_STRENGTH = 0.6;
 
+// How many metronome clicks per beat during recording (count-in and
+// capture both) -- 1 clicks only on the beat itself, 2 (the default)
+// adds a much quieter click on the in-between eighth as a subdivision
+// guide. A song-level setting (like beatsPerBar), not a chords-vs-
+// melody one -- it's about how the click *feels* to play along with,
+// not the pass being recorded.
+export const DEFAULT_METRONOME_SUBDIVISIONS_PER_BEAT = 2;
+
 // Whether two notes were "struck together" as one chord is a real-time
 // question -- a natural hand roll's spread doesn't change just because
 // the chosen *display* quantization grid is coarser or finer -- so
@@ -73,125 +84,139 @@ export const DEFAULT_MELODY_QUANTIZE_STRENGTH = 0.6;
 const CHORD_CLUSTER_THRESHOLD_BEATS = 0.35;
 
 /**
- * A completed chords pass -> { chords, sectionLengthBeats, skippedClusterCount }.
- * The chords pass is authoritative for a section's length (see this
- * project's own design discussion for why, not melody): trailing
- * empty bars -- dead air while reaching for the stop key -- are
- * trimmed first, then what's left rounds to the nearest 4-bar
- * interval, which is also the section length the following melody
- * pass plays back against and is bounded by.
+ * Every take is one of two kinds, decided purely by whether the
+ * section already has a length (`sectionLengthBeats` null or not):
  *
- * `captureDurationSeconds` -- how long the pass was actually
- * recording, count-in excluded, from recordingSession.js's own clock
- * -- is a required, separate input, not derived from the notes
- * played: dead air has no MIDI message at all, so "the last note's
- * end time" would silently throw away exactly the trailing-silence
- * information trimming needs.
+ *   - The *first* take recorded in a section -- whichever part it is --
+ *     sets the section's length. It runs open-ended until the player
+ *     stops it; trailing empty bars (dead air while reaching for the
+ *     stop key) are trimmed, and what's left rounds to the nearest
+ *     4-bar interval. `captureDurationSeconds` (how long it actually
+ *     ran, from recordingSession.js's own clock) is required here, not
+ *     derived from the notes: dead air has no MIDI message at all.
+ *   - Every take after that plays back against the section's existing
+ *     length and auto-stops there, clipped to it.
+ *
+ * `beatsPerBar` is the song's time signature (its numerator) -- the
+ * trim and the 4-bar rounding both measure "a bar" in its terms.
+ */
+function sectionLengthFromOnsets(onsetBeats, captureDurationSeconds, tempo, beatsPerBar) {
+  const totalBeats = captureDurationSeconds * (tempo / 60);
+  return roundToBarInterval(trimTrailingEmptyBars(totalBeats, onsetBeats, beatsPerBar), 4, beatsPerBar);
+}
+
+/**
+ * Drop anything starting at or past the section's end, and cut short
+ * anything spilling over it -- including dropping whatever that leaves
+ * zero-length, rather than keep an event that lasts no time at all.
+ * Works on any {start, end} shape: chords and notes alike.
+ */
+export function clipToSectionLength(events, sectionLengthBeats) {
+  return events
+    .filter((e) => e.start < sectionLengthBeats)
+    .map((e) => ({ ...e, end: Math.min(e.end, sectionLengthBeats) }))
+    .filter((e) => e.end > e.start);
+}
+
+/**
+ * A completed chords take -> { chords, sectionLengthBeats, skippedClusterCount }.
+ * Capturing always starts right on the downbeat (no pickup bar -- a
+ * chord change leading into a section isn't a thing the chart models).
  *
  * Notes too brief or too soft to be a deliberately played chord tone
- * (dropAccidentalTouches) are filtered out before clustering -- an
- * accidentally brushed adjacent key otherwise either gets folded into
- * the chord as a wrong extra pitch class, or, held long/hard enough to
- * survive that filter, breaks recognition outright for its own cluster.
- * Either way, a cluster detectChords can't make sense of (that,
- * *or* a genuine stray note/run -- a bit of melody accidentally played
- * during the chords take) is dropped, not thrown on; `skippedClusterCount`
- * says how many, so the UI can mention it without blocking on it -- one
- * bad moment costing an otherwise-good take, when every other chord was
- * fine, would be far worse.
- *
- * `beatsPerBar` is the song's time signature (its numerator, treating
- * the beat as a quarter note) -- defaults to 4/4, but the trailing-
- * silence trim and the 4-bar rounding both measure "a bar" in these
- * terms, so a 3/4 song's bars/pickup/count-in are 3 beats long, not 4.
+ * (dropAccidentalTouches) are filtered out before clustering; each
+ * cluster is then recognized as a chord, denoised if one slipped note
+ * spoils it, or dropped if even that can't make sense of it (see
+ * theory.js's detectChords) -- `skippedClusterCount` says how many were
+ * dropped, so the UI can mention it without failing the take.
  */
 export function processChordsPass(
   rawMessages,
   tempo,
-  captureDurationSeconds,
-  subdivisionsPerBeat = DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT,
-  beatsPerBar = DEFAULT_BEATS_PER_BAR
+  { captureDurationSeconds = null, sectionLengthBeats = null, subdivisionsPerBeat = DEFAULT_CHORDS_SUBDIVISIONS_PER_BEAT, beatsPerBar = DEFAULT_BEATS_PER_BAR } = {}
 ) {
-  // endTimestamp = the capture boundary itself, so a chord still held
-  // when stop() was pressed (the normal case) closes there instead of
-  // being dropped for never getting an explicit note-off.
-  const rawNotes = secondsToBeats(dropAccidentalTouches(messagesToNotes(rawMessages, captureDurationSeconds)), tempo);
+  const setsLength = sectionLengthBeats === null;
+  // A chord still held when the take ends (the normal case) closes at
+  // the capture boundary rather than vanishing for lack of a note-off.
+  const durationSeconds = captureDurationSeconds ?? sectionLengthBeats * (60 / tempo);
+  const rawNotes = secondsToBeats(dropAccidentalTouches(messagesToNotes(rawMessages, durationSeconds)), tempo);
   const detectedChords = detectChords(rawNotes, CHORD_CLUSTER_THRESHOLD_BEATS);
   // detectChords returns one entry per *recognized* cluster -- the gap
-  // between that and the total cluster count is exactly how many got
-  // dropped for not forming a known shape.
-  const totalClusterCount = clusterOnsets(rawNotes, CHORD_CLUSTER_THRESHOLD_BEATS).length;
-  const skippedClusterCount = totalClusterCount - detectedChords.length;
-  const rawChords = mergeConsecutiveChords(detectedChords);
+  // between that and the total cluster count is exactly how many were
+  // dropped.
+  const skippedClusterCount = clusterOnsets(rawNotes, CHORD_CLUSTER_THRESHOLD_BEATS).length - detectedChords.length;
   // Only *now*, after clustering has already decided which notes are
   // one chord, does the display grid come in -- purely rounding each
-  // chord's boundaries to it, same as any note (including the same
-  // "never round away to nothing" guard quantizeNotes uses).
+  // chord's boundaries to it, with the same "never round away to
+  // nothing" guard quantizeNotes uses.
   const step = 1 / subdivisionsPerBeat;
-  const chords = rawChords.map((c) => {
+  const chords = mergeConsecutiveChords(detectedChords).map((c) => {
     const start = quantizeBeat(c.start, subdivisionsPerBeat);
     let end = quantizeBeat(c.end, subdivisionsPerBeat);
     if (end <= start) end = start + step;
     return { ...c, start, end };
   });
 
-  const rawTotalBeats = captureDurationSeconds * (tempo / 60);
-  const trimmedBeats = trimTrailingEmptyBars(rawTotalBeats, chords.map((c) => c.start), beatsPerBar);
-  const sectionLengthBeats = roundToBarInterval(trimmedBeats, 4, beatsPerBar);
-
-  return { chords, sectionLengthBeats, skippedClusterCount };
+  if (setsLength) {
+    return { chords, sectionLengthBeats: sectionLengthFromOnsets(chords.map((c) => c.start), durationSeconds, tempo, beatsPerBar), skippedClusterCount };
+  }
+  return { chords: clipToSectionLength(chords, sectionLengthBeats), sectionLengthBeats, skippedClusterCount };
 }
 
 /**
- * A completed melody pass -> { notes }. Also used, as-is, for the
- * optional bassline pass (RecordBassline.jsx) -- this processing
- * (pickup rebasing, quantize-strength, monophonic clipping) has
- * nothing melody-specific about it; it applies equally to any single
- * monophonic voice captured against the section's already-fixed
- * chords/length, not just the treble line.
+ * A completed melody or bassline take -> { notes, sectionLengthBeats }.
+ * The same processing for both, differing only in which single voice
+ * gets pulled out of whatever was actually played (see theory.js):
+ * melody is the top line (extractTopLine), bassline the bottom line
+ * (extractBassLine). Either way a take can be as messy as playing
+ * naturally with both hands -- the rest of the texture just falls away.
  *
- * Capturing runs for one pickup
- * bar (PICKUP_BEATS) plus `sectionLengthBeats` (already fixed by the
- * chords pass, see recordingSession.js) -- notes get rebased so beat 0
- * lines up with the actual downbeat (where the chords start), meaning
- * a pickup note comes back with a *negative* start, not clipped or
- * dropped. Anything at or past the section's own end is clipped the
- * same way a note spilling into the boundary always was.
+ * A take recorded against an existing length can start with a pickup
+ * bar (`pickupBeats`, 0 to skip it) -- capturing begins that far ahead
+ * of the section's downbeat, so a pickup note comes back with a
+ * *negative* start rather than being lost. The take that sets the
+ * section's length never has one: there's no downbeat to lead into yet.
  *
  * `quantizeStrength` (0-1, see theory.js's quantizeBeat) is how hard
- * notes snap to the grid -- full strength is a strict nearest-neighbor
- * snap, softer preserves more of the actual take's timing.
- *
- * `pickupBeats` defaults to PICKUP_BEATS (a full bar) but can be 0 --
- * a song that never needs a lead-in can skip the pickup bar entirely;
- * capturing then starts right on the downbeat, same as the chords pass.
- *
- * The melody is enforced monophonic (clipOverlappingNotes) right after
- * quantizing -- a held note released a little late, or quantization
- * rounding two notes' boundaries toward each other, routinely leaves
- * one note's end just past the next one's start, which is two notes
- * audibly ringing together in a line that's melodically one voice.
+ * notes snap to the grid. The line is then enforced monophonic
+ * (clipOverlappingNotes) -- a note released a little late, or two
+ * boundaries rounding toward each other, otherwise leaves two notes
+ * ringing together in a line that's one voice.
  */
-export function processMelodyPass(
+export function processLinePass(
+  part,
   rawMessages,
   tempo,
-  sectionLengthBeats,
-  subdivisionsPerBeat = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
-  quantizeStrength = DEFAULT_MELODY_QUANTIZE_STRENGTH,
-  pickupBeats = PICKUP_BEATS
+  {
+    captureDurationSeconds = null,
+    sectionLengthBeats = null,
+    subdivisionsPerBeat = DEFAULT_MELODY_SUBDIVISIONS_PER_BEAT,
+    quantizeStrength = DEFAULT_MELODY_QUANTIZE_STRENGTH,
+    pickupBeats = PICKUP_BEATS,
+    beatsPerBar = DEFAULT_BEATS_PER_BAR,
+  } = {}
 ) {
-  const totalCaptureBeats = pickupBeats + sectionLengthBeats;
-  // Same reasoning as processChordsPass: a melody note still held
-  // when playback auto-stops should close there, not vanish.
-  const captureDurationSeconds = totalCaptureBeats * (60 / tempo);
-  const notes = clipOverlappingNotes(quantizeNotes(secondsToBeats(messagesToNotes(rawMessages, captureDurationSeconds), tempo), subdivisionsPerBeat, quantizeStrength))
-    .map((n) => ({ ...n, start: n.start - pickupBeats, end: n.end - pickupBeats }))
-    .filter((n) => n.start < sectionLengthBeats)
-    .map((n) => ({ ...n, end: Math.min(n.end, sectionLengthBeats) }))
-    // Clipping to the boundary above can turn a note that quantized
-    // right onto it into a zero-length note -- drop those rather than
-    // keep a note that plays for no time at all.
-    .filter((n) => n.end > n.start);
+  const setsLength = sectionLengthBeats === null;
+  const pickup = setsLength ? 0 : pickupBeats;
+  const durationSeconds = captureDurationSeconds ?? (pickup + sectionLengthBeats) * (60 / tempo);
+  // Extraction works in real seconds, before converting to beats --
+  // "struck together" and "legato overlap" are physical-timing
+  // questions, not tempo-relative ones.
+  const played = messagesToNotes(rawMessages, durationSeconds);
+  const line = part === 'bassline' ? extractBassLine(played) : extractTopLine(played);
+  const notes = clipOverlappingNotes(quantizeNotes(secondsToBeats(line, tempo), subdivisionsPerBeat, quantizeStrength)).map((n) => ({
+    ...n,
+    start: n.start - pickup,
+    end: n.end - pickup,
+  }));
 
-  return { notes };
+  if (setsLength) {
+    return { notes, sectionLengthBeats: sectionLengthFromOnsets(notes.map((n) => n.start), durationSeconds, tempo, beatsPerBar) };
+  }
+  return { notes: clipToSectionLength(notes, sectionLengthBeats), sectionLengthBeats };
+}
+
+/** One completed take of any part -- the single entry point recordingSession.js and the section hub both use. */
+export function processTake(part, rawMessages, tempo, options) {
+  return part === 'chords' ? processChordsPass(rawMessages, tempo, options) : processLinePass(part, rawMessages, tempo, options);
 }

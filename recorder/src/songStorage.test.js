@@ -88,11 +88,10 @@ describe('buildChartData', () => {
       melodyQuantization: 4, // not passed above -- defaults to 16th notes
       melodyQuantizeStrength: 0.6, // not passed above -- defaults to the softened snap
       melodyPickupBeats: 4, // not passed above -- defaults to a full pickup bar
-      hasBassline: false, // not passed above -- no bassline pass for this song
-      basslineFirst: false,
       basslineQuantization: 4,
       basslineQuantizeStrength: 0.6,
       basslinePickupBeats: 4,
+      metronomeSubdivisionsPerBeat: 2, // not passed above -- defaults to 8th notes
       sections: [{ label: 'A', start_beat: 0, end_beat: 16 }],
       chords: [
         { beat: 0, duration_beats: 4, chord: 'C', section: 'A' },
@@ -129,11 +128,10 @@ describe('readChartQuantization', () => {
       melodyQuantization: 8,
       melodyQuantizeStrength: 1,
       melodyPickupBeats: 0,
-      hasBassline: false,
-      basslineFirst: false,
       basslineQuantization: 4,
       basslineQuantizeStrength: 0.6,
       basslinePickupBeats: 4,
+      metronomeSubdivisionsPerBeat: 2,
     });
   });
 
@@ -143,31 +141,31 @@ describe('readChartQuantization', () => {
       melodyQuantization: 8,
       melodyQuantizeStrength: 0.6,
       melodyPickupBeats: 4,
-      hasBassline: false,
-      basslineFirst: false,
       basslineQuantization: 4,
       basslineQuantizeStrength: 0.6,
       basslinePickupBeats: 4,
+      metronomeSubdivisionsPerBeat: 2,
     });
     expect(readChartQuantization({})).toEqual({
       chordsQuantization: 2,
       melodyQuantization: 4,
       melodyQuantizeStrength: 0.6,
       melodyPickupBeats: 4,
-      hasBassline: false,
-      basslineFirst: false,
       basslineQuantization: 4,
       basslineQuantizeStrength: 0.6,
       basslinePickupBeats: 4,
+      metronomeSubdivisionsPerBeat: 2,
     });
+  });
+
+  it('reads a saved metronome subdivision setting back', () => {
+    expect(readChartQuantization({ metronomeSubdivisionsPerBeat: 1 }).metronomeSubdivisionsPerBeat).toBe(1);
   });
 
   it('reads bassline settings back, and falls back basslinePickupBeats to a full bar of the time signature', () => {
     expect(
-      readChartQuantization({ hasBassline: true, basslineFirst: true, basslineQuantization: 8, basslineQuantizeStrength: 1, basslinePickupBeats: 0 })
+      readChartQuantization({ basslineQuantization: 8, basslineQuantizeStrength: 1, basslinePickupBeats: 0 })
     ).toMatchObject({
-      hasBassline: true,
-      basslineFirst: true,
       basslineQuantization: 8,
       basslineQuantizeStrength: 1,
       basslinePickupBeats: 0,
@@ -332,6 +330,17 @@ describe('sectionChordsAsInternal', () => {
     const expectedChords = internalChords.map((c) => ({ ...c, bassPitchClass: c.rootPitchClass })); // round-tripped through a plain (non-slash) symbol -- bass defaults to the root
     expect(sectionChordsAsInternal(withB, withB.sections[0])).toEqual(expectedChords);
     expect(sectionChordsAsInternal(withB, withB.sections[1])).toEqual(expectedChords);
+  });
+
+  it('drops a symbol it can\'t parse (e.g. a hand-edited file) instead of passing on a half-formed chord', () => {
+    const chartData = {
+      sections: [{ label: 'A', start_beat: 0, end_beat: 8 }],
+      chords: [
+        { beat: 0, duration_beats: 4, chord: 'C', section: 'A' },
+        { beat: 4, duration_beats: 4, chord: 'Cadd11', section: 'A' },
+      ],
+    };
+    expect(sectionChordsAsInternal(chartData, chartData.sections[0])).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 }]);
   });
 });
 

@@ -7,15 +7,15 @@ import './shared.css';
  * per-section record loop begins (see the design discussion: this is
  * deliberately its own screen, not combined with the chords-recording
  * console, so there's never a text input focused on the same screen
- * spacebar is used to start/stop recording). Quantization lives on the
- * record screens themselves instead (RecordChords/RecordMelody, and
- * their review screens) -- it needs to be changeable there anyway
- * (including in re-record flows, which skip this screen entirely), so
- * asking for it twice here too would be redundant.
+ * spacebar is used to start/stop recording). Which parts a song has --
+ * chords, melody, bassline -- isn't asked here at all: every section's
+ * hub offers all three, in any order (see SectionHub.jsx). Quantization
+ * lives on the record screen and the hub too, where it can actually be
+ * heard and re-derived.
  *
  * `initial`, when given, pre-fills every field from an already-submitted
  * song -- RecordSongFlow passes its own `song` state back in here so
- * navigating back to this screen (from RecordChords, the very next
+ * navigating back to this screen (from the section hub, the very next
  * step) doesn't throw away title/key/tempo/time-signature the player
  * already typed in and re-show this screen blank, forcing them to
  * retype everything just to get back to where they were.
@@ -25,8 +25,6 @@ export default function SongSetup({ initial = null, onBack, onSubmit }) {
   const [key, setKey] = useState(initial?.key ?? 'C');
   const [tempo, setTempo] = useState(initial?.tempo ?? 96);
   const [beatsPerBar, setBeatsPerBar] = useState(initial?.beatsPerBar ?? 4);
-  const [hasBassline, setHasBassline] = useState(initial?.hasBassline ?? false);
-  const [basslineFirst, setBasslineFirst] = useState(initial?.basslineFirst ?? false);
 
   const canSubmit = title.trim().length > 0 && key.trim().length > 0 && Number(tempo) > 0;
 
@@ -53,19 +51,6 @@ export default function SongSetup({ initial = null, onBack, onSubmit }) {
         <TimeSignatureSelect value={beatsPerBar} onChange={setBeatsPerBar} />
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink-soft)' }}>
-          <input type="checkbox" checked={hasBassline} onChange={(e) => setHasBassline(e.target.checked)} />
-          Record a separate bass line, in addition to chords and melody
-        </label>
-        {hasBassline && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink-soft)', marginLeft: 22 }}>
-            <input type="checkbox" checked={basslineFirst} onChange={(e) => setBasslineFirst(e.target.checked)} />
-            Record the bass line before the melody, not after
-          </label>
-        )}
-      </div>
-
       <div className="actions-row" style={{ justifyContent: 'flex-end', gap: 12 }}>
         {!canSubmit && (
           <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
@@ -75,9 +60,9 @@ export default function SongSetup({ initial = null, onBack, onSubmit }) {
         <button
           className="btn-primary"
           disabled={!canSubmit}
-          onClick={() => onSubmit({ title: title.trim(), key: key.trim(), tempo: Number(tempo), beatsPerBar, hasBassline, basslineFirst })}
+          onClick={() => onSubmit({ title: title.trim(), key: key.trim(), tempo: Number(tempo), beatsPerBar })}
         >
-          Start Recording Chords &rarr;
+          Start Recording &rarr;
         </button>
       </div>
     </div>

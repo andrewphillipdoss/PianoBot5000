@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { playNoteForDuration } from './pianoSynth.js';
+import { playClickAt, playNoteForDuration } from './pianoSynth.js';
 import { RecordingSession } from './recordingSession.js';
 
 // Only the audio side is mocked (real Web Audio doesn't exist in this
@@ -23,10 +23,10 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-describe('RecordingSession (chords mode)', () => {
+describe('RecordingSession (open-ended chords take)', () => {
   it('goes idle -> countIn -> capturing -> done, buffering messages only while capturing', async () => {
     const phases = [];
-    const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'chords', onPhaseChange: (p) => phases.push(p) });
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'chords', onPhaseChange: (p) => phases.push(p) });
 
     expect(session.phase).toBe('idle');
     session.start();
@@ -67,7 +67,7 @@ describe('RecordingSession (chords mode)', () => {
     // to start()'s own timestamp plus the nominal count-in duration
     // instead makes this immune to how late the callback actually runs.
     const startedAt = performance.now();
-    const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'chords' });
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'chords' });
     session.start();
     await wait(80);
     expect(session.phase).toBe('capturing');
@@ -79,7 +79,7 @@ describe('RecordingSession (chords mode)', () => {
   });
 
   it('count-in length follows a non-default time signature (3/4 -- one 3-beat bar, not 4)', async () => {
-    const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'chords', beatsPerBar: 3 });
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'chords', beatsPerBar: 3 });
     session.start();
     await wait(20); // less than a 3-beat (30ms) count-in
     expect(session.phase).toBe('countIn');
@@ -88,7 +88,7 @@ describe('RecordingSession (chords mode)', () => {
   });
 
   it('cancel() stops everything and goes back to idle', async () => {
-    const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'chords' });
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'chords' });
     session.start();
     await wait(80);
     expect(session.phase).toBe('capturing');
@@ -97,7 +97,7 @@ describe('RecordingSession (chords mode)', () => {
   });
 
   it('stop() is a no-op outside the capturing phase', () => {
-    const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'chords' });
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'chords' });
     session.start();
     expect(session.phase).toBe('countIn');
     session.stop(); // too early -- still counting in
@@ -109,7 +109,7 @@ describe('RecordingSession (chords mode)', () => {
     let errorCalled = false;
     const session = new RecordingSession({
       tempo: FAST_TEMPO,
-      mode: 'chords',
+      part: 'chords',
       onDone: (r) => {
         result = r;
       },
@@ -137,17 +137,84 @@ describe('RecordingSession (chords mode)', () => {
   });
 });
 
-describe('RecordingSession (melody mode)', () => {
+describe('RecordingSession: any part can set the length, or record against it', () => {
+  it('a melody take with no length yet runs open-ended -- no pickup bar, stop() ends it, and it sets the length', async () => {
+    const pickupBarChanges = [];
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'melody', onPickupBarChange: (p) => pickupBarChanges.push(p) });
+    session.start();
+    await wait(80);
+    expect(session.phase).toBe('capturing');
+    expect(session.isPickupBar).toBe(false);
+
+    const t = performance.now();
+    session.handleMidiMessage({ timestamp: t, type: 'noteon', note: 67, velocity: 90 });
+    session.handleMidiMessage({ timestamp: t + 5, type: 'noteoff', note: 67, velocity: 0 });
+    await wait(30);
+    session.stop();
+
+    expect(session.phase).toBe('done');
+    expect(pickupBarChanges.every((p) => p === false)).toBe(true);
+    expect(session.result.part).toBe('melody');
+    expect(session.result.setsLength).toBe(true);
+    expect(session.result.pickupBeats).toBe(0);
+    expect(session.result.notes.map((n) => n.pitch)).toEqual([67]);
+    expect(session.result.sectionLengthBeats).toBeGreaterThan(0);
+  });
+
+  it('a chords take against an existing length auto-finishes there, and never gets a pickup bar', async () => {
+    let result = null;
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'chords', onDone: (r) => (result = r) });
+    session.start({ sectionLengthBeats: 16 });
+    await wait(60);
+    expect(session.phase).toBe('capturing');
+    expect(session.isPickupBar).toBe(false);
+    session.stop(); // a no-op on a fixed take -- it ends on its own
+    expect(session.phase).toBe('capturing');
+
+    await wait(200); // past 16 beats * 10ms
+    expect(session.phase).toBe('done');
+    expect(result.setsLength).toBe(false);
+    expect(result.sectionLengthBeats).toBe(16);
+  });
+});
+
+describe('RecordingSession metronome subdivision', () => {
+  it('defaults to eighth notes -- a quiet "off" subdivision click between each beat', async () => {
+    playClickAt.mockClear();
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'chords' });
+    session.start();
+    await wait(40); // past the first schedule-ahead tick
+    session.cancel();
+
+    const strengths = playClickAt.mock.calls.map(([, strength]) => strength);
+    expect(strengths).toContain('off');
+  });
+
+  it('quarter notes (metronomeSubdivisionsPerBeat: 1) never schedules a subdivision click', async () => {
+    playClickAt.mockClear();
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'chords', metronomeSubdivisionsPerBeat: 1 });
+    session.start();
+    await wait(40);
+    session.cancel();
+
+    const strengths = playClickAt.mock.calls.map(([, strength]) => strength);
+    expect(strengths.length).toBeGreaterThan(0); // still clicking, just only on the beat
+    expect(strengths).not.toContain('off');
+    expect(strengths.every((s) => s === 'strong' || s === 'weak')).toBe(true);
+  });
+});
+
+describe('RecordingSession (fixed-length melody take)', () => {
   it('auto-finishes after sectionLengthBeats and calls onDone', async () => {
     let doneResult = null;
     const session = new RecordingSession({
       tempo: FAST_TEMPO,
-      mode: 'melody',
+      part: 'melody',
       onDone: (result) => {
         doneResult = result;
       },
     });
-    session.start({ chords: [], sectionLengthBeats: 20 }); // 20 beats * 10ms = 200ms of capture -- long enough to leave real margin around the count-in and the message below
+    session.start({ sectionLengthBeats: 20 }); // 20 beats * 10ms = 200ms of capture -- long enough to leave real margin around the count-in and the message below
 
     await wait(80); // past the ~40ms count-in, comfortably before the 200ms capture window ends
     expect(session.phase).toBe('capturing');
@@ -167,10 +234,10 @@ describe('RecordingSession (melody mode)', () => {
     const pickupBarChanges = [];
     const session = new RecordingSession({
       tempo: FAST_TEMPO,
-      mode: 'melody',
+      part: 'melody',
       onPickupBarChange: (isPickupBar) => pickupBarChanges.push(isPickupBar),
     });
-    session.start({ chords: [], sectionLengthBeats: 20 });
+    session.start({ sectionLengthBeats: 20 });
 
     await wait(20); // still in count-in -- pickup bar hasn't started yet
     expect(session.isPickupBar).toBe(false);
@@ -189,11 +256,11 @@ describe('RecordingSession (melody mode)', () => {
     const pickupBarChanges = [];
     const session = new RecordingSession({
       tempo: FAST_TEMPO,
-      mode: 'melody',
+      part: 'melody',
       pickupBeats: 0,
       onPickupBarChange: (isPickupBar) => pickupBarChanges.push(isPickupBar),
     });
-    session.start({ chords: [], sectionLengthBeats: 20 });
+    session.start({ sectionLengthBeats: 20 });
 
     await wait(80); // past the count-in -- capturing has begun
     expect(session.phase).toBe('capturing');
@@ -213,8 +280,8 @@ describe('RecordingSession (melody mode)', () => {
     // full pickup bar after the count-in ends.
     playNoteForDuration.mockClear();
     const chords = [{ rootPitchClass: 0, quality: 'maj', start: 2.25, end: 3 }];
-    const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'melody' });
-    session.start({ chords, sectionLengthBeats: 20 });
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'melody' });
+    session.start({ sectionLengthBeats: 20, backing: { chords } });
 
     await wait(80); // past the count-in -- chord backing gets scheduled all at once right here
     expect(playNoteForDuration).toHaveBeenCalled();
@@ -228,10 +295,21 @@ describe('RecordingSession (melody mode)', () => {
     }
   });
 
+  it('plays the other lines back too -- a backing melody note lands on its own beat, after the pickup bar', async () => {
+    playNoteForDuration.mockClear();
+    const melody = [{ pitch: 72, velocity: 88, start: 1.5, end: 2 }];
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'bassline' });
+    session.start({ sectionLengthBeats: 20, backing: { melody } });
+    session.cancel();
+
+    const secondsPerBeat = 60 / FAST_TEMPO;
+    expect(playNoteForDuration).toHaveBeenCalledWith(72, 88, expect.closeTo(0.05 + (4 + 4 + 1.5) * secondsPerBeat, 10), expect.any(Number));
+  });
+
   it('restart() discards the in-progress take and begins a fresh count-in', async () => {
     const phases = [];
-    const session = new RecordingSession({ tempo: FAST_TEMPO, mode: 'melody', onPhaseChange: (p) => phases.push(p) });
-    session.start({ chords: [], sectionLengthBeats: 20 }); // comfortable margin before auto-finish -- see the auto-finish test above for why a short window here races
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'melody', onPhaseChange: (p) => phases.push(p) });
+    session.start({ sectionLengthBeats: 20 }); // comfortable margin before auto-finish -- see the auto-finish test above for why a short window here races
     await wait(80);
     expect(session.phase).toBe('capturing');
     session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 60, velocity: 90 });

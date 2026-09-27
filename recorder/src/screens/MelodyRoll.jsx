@@ -5,17 +5,21 @@ const ROW_HEIGHT = 8; // px per semitone
 const PITCH_PADDING = 2; // semitones of headroom above/below the notes actually played
 
 /**
- * A simple piano-roll view of a section's captured melody -- not real
+ * A simple piano-roll view of a section's captured melody (or bassline) -- not real
  * lead-sheet notation (staff/clef rendering is a deliberately separate,
  * later piece; see the README), just enough of a visual to see the
  * melody's shape: time left-to-right, pitch low-to-high, note length
  * as bar width. A shaded band covers any pickup-bar beats (negative
  * beat positions, before the section's own downbeat at beat 0).
  */
-export default function MelodyRoll({ notes, sectionLengthBeats, beatsPerBar = 4 }) {
-  if (notes.length === 0) {
-    return <span style={{ color: 'var(--ink-soft)', fontSize: 14 }}>No melody recorded</span>;
+export default function MelodyRoll({ notes: rawNotes, sectionLengthBeats, beatsPerBar = 4, emptyMessage = 'No melody recorded' }) {
+  if (rawNotes.length === 0) {
+    return <span style={{ color: 'var(--ink-soft)', fontSize: 14 }}>{emptyMessage}</span>;
   }
+  // Takes either shape: on-disk entries ({beat, duration_beats}, rebased
+  // to the section -- SongView) or internal NoteEvents ({start, end} --
+  // the section hub and record screen, straight from a take).
+  const notes = rawNotes.map((n) => ('beat' in n ? n : { ...n, beat: n.start, duration_beats: n.end - n.start }));
 
   const minBeat = Math.min(0, ...notes.map((n) => n.beat));
   const maxBeat = sectionLengthBeats;

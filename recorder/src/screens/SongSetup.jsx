@@ -12,12 +12,19 @@ import './shared.css';
  * their review screens) -- it needs to be changeable there anyway
  * (including in re-record flows, which skip this screen entirely), so
  * asking for it twice here too would be redundant.
+ *
+ * `initial`, when given, pre-fills every field from an already-submitted
+ * song -- RecordSongFlow passes its own `song` state back in here so
+ * navigating back to this screen (from RecordChords, the very next
+ * step) doesn't throw away title/key/tempo/time-signature the player
+ * already typed in and re-show this screen blank, forcing them to
+ * retype everything just to get back to where they were.
  */
-export default function SongSetup({ onBack, onSubmit }) {
-  const [title, setTitle] = useState('');
-  const [key, setKey] = useState('C');
-  const [tempo, setTempo] = useState(96);
-  const [beatsPerBar, setBeatsPerBar] = useState(4);
+export default function SongSetup({ initial = null, onBack, onSubmit }) {
+  const [title, setTitle] = useState(initial?.title ?? '');
+  const [key, setKey] = useState(initial?.key ?? 'C');
+  const [tempo, setTempo] = useState(initial?.tempo ?? 96);
+  const [beatsPerBar, setBeatsPerBar] = useState(initial?.beatsPerBar ?? 4);
 
   const canSubmit = title.trim().length > 0 && key.trim().length > 0 && Number(tempo) > 0;
 

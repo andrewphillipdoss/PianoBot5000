@@ -2,10 +2,10 @@ import { useEffect } from 'react';
 import { useMidi } from '../hooks/MidiProvider.jsx';
 import { useRecordingSession } from '../hooks/useRecordingSession.js';
 import ChordChart from './ChordChart.jsx';
+import ChordLabel from './ChordLabel.jsx';
 import QuantizationSelect from './QuantizationSelect.jsx';
 import QuantizeStrengthSelect from './QuantizeStrengthSelect.jsx';
 import TempoInput from './TempoInput.jsx';
-import { formatChordSymbol } from '../theory.js';
 import './shared.css';
 
 /**
@@ -102,7 +102,7 @@ export default function RecordMelody({
         <span className="panel-label">Chords (playing back)</span>
         <ChordChart
           chords={chordsResult.chords}
-          renderLabel={(chord) => formatChordSymbol(chord.rootPitchClass, chord.quality)}
+          renderLabel={(chord) => <ChordLabel {...chord} />}
           barStyle={{ fontSize: 14, padding: '10px 6px' }}
           beatsPerBar={beatsPerBar}
         />

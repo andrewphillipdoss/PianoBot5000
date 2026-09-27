@@ -35,36 +35,47 @@ describe('playNoteForDuration', () => {
   // with that error means the fix regressed, not that the fake is
   // incomplete.
   function installFakeAudioContext() {
-    const gainEvents = [];
+    // Every gain node now gets its own `.events` log rather than one
+    // shared array: connectRhodesPartials's tine partial schedules its
+    // own short automation curve on its own gain node (see
+    // pianoSynth.js), so "the master bus's own envelope calls" and "a
+    // partial's own mix-level automation" would otherwise interleave
+    // in one flat list. `createdGainNodes[0]` is always the master bus
+    // -- both playNoteAt/playNoteForDuration create it before calling
+    // connectRhodesPartials for the rest.
+    const createdGainNodes = [];
     const oscillators = [];
 
     function makeGainNode() {
+      const events = [];
       const gain = {
         get value() {
           throw new Error('playNoteForDuration must never read AudioParam.value -- see its own comment for why');
         },
         // Writing .value directly (not reading it back) is legitimate,
-        // static usage -- pianoSynth.js does this for each harmonic's
+        // static usage -- pianoSynth.js does this for each partial's
         // fixed mix level, nothing to do with envelope automation.
         set value(_v) {},
         setValueAtTime(value, time) {
-          gainEvents.push({ method: 'setValueAtTime', value, time });
+          events.push({ method: 'setValueAtTime', value, time });
           return gain;
         },
         linearRampToValueAtTime(value, time) {
-          gainEvents.push({ method: 'linearRampToValueAtTime', value, time });
+          events.push({ method: 'linearRampToValueAtTime', value, time });
           return gain;
         },
         exponentialRampToValueAtTime(value, time) {
-          gainEvents.push({ method: 'exponentialRampToValueAtTime', value, time });
+          events.push({ method: 'exponentialRampToValueAtTime', value, time });
           return gain;
         },
         cancelScheduledValues(time) {
-          gainEvents.push({ method: 'cancelScheduledValues', time });
+          events.push({ method: 'cancelScheduledValues', time });
           return gain;
         },
       };
-      return { gain, connect: () => {} };
+      const node = { gain, events, connect: () => {} };
+      createdGainNodes.push(node);
+      return node;
     }
 
     function makeOscillator() {
@@ -90,7 +101,7 @@ describe('playNoteForDuration', () => {
     }
 
     globalThis.window = { AudioContext: FakeAudioContext };
-    return { gainEvents, oscillators };
+    return { createdGainNodes, oscillators };
   }
 
   beforeEach(() => {
@@ -102,30 +113,32 @@ describe('playNoteForDuration', () => {
   });
 
   it('schedules a fully analytic attack/decay/release envelope ending at true silence, never reading .value', async () => {
-    const { gainEvents, oscillators } = installFakeAudioContext();
+    const { createdGainNodes, oscillators } = installFakeAudioContext();
     const { enableAudio, playNoteForDuration } = await import('./pianoSynth.js');
     await enableAudio();
 
     expect(() => playNoteForDuration(60, 90, 1.0, 0.5)).not.toThrow();
 
-    expect(gainEvents[0]).toMatchObject({ method: 'setValueAtTime', value: 0, time: 1.0 });
-    expect(gainEvents.map((e) => e.method)).toEqual([
+    const master = createdGainNodes[0];
+    expect(master.events[0]).toMatchObject({ method: 'setValueAtTime', value: 0, time: 1.0 });
+    expect(master.events.map((e) => e.method)).toEqual([
       'setValueAtTime',
       'linearRampToValueAtTime', // attack
       'exponentialRampToValueAtTime', // decay
       'linearRampToValueAtTime', // release
     ]);
 
-    const release = gainEvents.at(-1);
+    const release = master.events.at(-1);
     expect(release.value).toBe(0); // true silence, not the old 0.0001 floor -- no truncation click when the oscillator stops
 
-    for (let i = 1; i < gainEvents.length; i++) {
-      expect(gainEvents[i].time).toBeGreaterThanOrEqual(gainEvents[i - 1].time); // a valid, strictly-forward automation curve
+    for (let i = 1; i < master.events.length; i++) {
+      expect(master.events[i].time).toBeGreaterThanOrEqual(master.events[i - 1].time); // a valid, strictly-forward automation curve
     }
 
-    // One oscillator per harmonic, all starting exactly at `when` and
-    // stopping only once the gain curve has actually reached silence.
-    expect(oscillators).toHaveLength(3);
+    // Four partials (fundamental, octave, tine, tremolo), all starting
+    // exactly at `when` and stopping only once the gain curve has
+    // actually reached silence.
+    expect(oscillators).toHaveLength(4);
     for (const osc of oscillators) {
       expect(osc.start).toHaveBeenCalledWith(1.0);
       expect(osc.stop.mock.calls[0][0]).toBeGreaterThan(release.time);
@@ -133,17 +146,30 @@ describe('playNoteForDuration', () => {
   });
 
   it('inserts an explicit hold point before releasing when the note outlasts the decay', async () => {
-    const { gainEvents } = installFakeAudioContext();
+    const { createdGainNodes } = installFakeAudioContext();
     const { enableAudio, playNoteForDuration } = await import('./pianoSynth.js');
     await enableAudio();
 
     playNoteForDuration(60, 90, 0, 2); // well longer than the ~0.6s decay
-    expect(gainEvents.map((e) => e.method)).toEqual([
+    expect(createdGainNodes[0].events.map((e) => e.method)).toEqual([
       'setValueAtTime',
       'linearRampToValueAtTime',
       'exponentialRampToValueAtTime',
       'setValueAtTime', // the hold point -- nothing to read back, its value is already known analytically
       'linearRampToValueAtTime',
     ]);
+  });
+
+  it("gives the tine/bark partial its own short decay, independent of how long the note is held", async () => {
+    const { createdGainNodes } = installFakeAudioContext();
+    const { enableAudio, playNoteForDuration } = await import('./pianoSynth.js');
+    await enableAudio();
+
+    playNoteForDuration(60, 90, 0, 2); // a long-held note -- the bark must still decay quickly, not track this duration
+    // Creation order in connectRhodesPartials: master(0), fundamentalGain(1), octaveGain(2), tineGain(3), tremoloDepth(4).
+    const tine = createdGainNodes[3];
+    expect(tine.events.map((e) => e.method)).toEqual(['setValueAtTime', 'exponentialRampToValueAtTime']);
+    const [peak, decayed] = tine.events;
+    expect(decayed.time - peak.time).toBeLessThan(0.2);
   });
 });

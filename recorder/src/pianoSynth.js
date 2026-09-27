@@ -1,12 +1,22 @@
 /**
- * A tiny synthesized piano-ish voice for live feedback while playing
- * -- NOT sampled audio, just a few triangle-wave harmonics through a
- * percussive envelope (fast attack, decays even while held, quick
- * release on note-off, roughly how a real piano string behaves). This
- * is the cheap version: zero dependencies, nothing to download. If it
- * ever doesn't sound convincing enough, swap it for real sampled
- * piano audio -- a genuinely different (bigger) addition, not a
- * tweak to this file.
+ * A tiny synthesized Rhodes-ish electric piano voice for live feedback
+ * while playing -- NOT sampled audio, a handful of sine partials
+ * layered under one shared percussive amplitude envelope (fast attack,
+ * decays even while held, quick release on note-off). This is the
+ * cheap version: zero dependencies, nothing to download. If it ever
+ * doesn't sound convincing enough, swap it for real sampled piano
+ * audio -- a genuinely different (bigger) addition, not a tweak to
+ * this file.
+ *
+ * The Rhodes character (see `connectRhodesPartials`) comes from
+ * layering a fast, velocity-scaled, independently-decaying "tine"
+ * partial on top of an otherwise plain sine fundamental -- real
+ * tine-and-pickup electric pianos are never perfectly harmonic, and
+ * that partial decaying out of the sustained tone within its own fixed
+ * ~0.1s (never longer, however long the note is held) is what reads as
+ * "electric bark" rather than "pure bell." A quiet, slow sine tremolo
+ * is layered on top of that, the same way the real instrument's own
+ * vibrato/tremolo circuit sits after the tone itself.
  *
  * Also the one metronome click sound (playClickAt) -- a separate,
  * much shorter percussive blip, not tracked as a "voice" the way
@@ -28,14 +38,75 @@ let audioContext = null;
 const activeVoices = new Map(); // pitch -> { oscillators, master } -- the live (duration-unknown-in-advance) path
 const scheduledVoices = new Set(); // { oscillators, master } -- the known-duration path (playNoteForDuration); see there for why these are tracked separately
 
-const HARMONICS = [1, 2, 3]; // fundamental + two overtones
-const HARMONIC_GAINS = [1, 0.25, 0.1];
+const OCTAVE_RATIO = 2;
+const OCTAVE_GAIN = 0.07; // a little body/warmth under the fundamental, not a full-strength harmonic
+const TINE_RATIO = 3.005; // a hair sharp of a pure 3rd harmonic -- that slight inharmonicity, not a clean overtone, is the "electric" part of the bark
+const TINE_PEAK_RATIO = 0.9; // relative to this note's own peak gain, so a harder strike brings in more bark, same as a real tine responds to velocity
+const TINE_DECAY_SECONDS = 0.12; // always this fast, regardless of note length -- a held note settles into the plain fundamental, it doesn't keep barking
+const TREMOLO_HZ = 5;
+const TREMOLO_DEPTH_RATIO = 0.06; // +-6% of peak gain -- the classic Rhodes vibrato/tremolo switch, subtle rather than syrupy
 
 const ATTACK_SECONDS = 0.005;
 const DECAY_SECONDS = 0.6; // matches the live envelope's "decays even while held" shape
 const SUSTAIN_RATIO = 0.15;
 const RELEASE_SECONDS = 0.15;
 const MIN_GAIN = 0.0001; // exponentialRampToValueAtTime can't target exactly 0
+
+/**
+ * The sine partials for one note, connected into `master` (which owns
+ * the shared attack/decay/sustain/release envelope -- this only shapes
+ * the *mix* between partials over time, layered under that envelope):
+ * the fundamental at a constant relative level, a quiet octave partial
+ * for warmth, and the fast-decaying "tine" partial described above.
+ * Also wires up a slow, quiet tremolo LFO straight into `master.gain`
+ * itself (an audio-rate signal summed on top of whatever automation
+ * curve is already scheduled there -- the standard Web Audio tremolo
+ * technique, and why this needs no automation calls of its own to stay
+ * click-free).
+ *
+ * Returns just the oscillators, already `.start()`ed at `when` -- the
+ * caller decides when each one stops (immediately for a live note's
+ * eventual note-off, or a known release time for a fully-scheduled
+ * one), same as it always has for every partial.
+ */
+function connectRhodesPartials(baseFreq, when, master, peakGain) {
+  const fundamental = audioContext.createOscillator();
+  fundamental.type = 'sine';
+  fundamental.frequency.setValueAtTime(baseFreq, when);
+  const fundamentalGain = audioContext.createGain();
+  fundamentalGain.gain.value = 1;
+  fundamental.connect(fundamentalGain);
+  fundamentalGain.connect(master);
+
+  const octave = audioContext.createOscillator();
+  octave.type = 'sine';
+  octave.frequency.setValueAtTime(baseFreq * OCTAVE_RATIO, when);
+  const octaveGain = audioContext.createGain();
+  octaveGain.gain.value = OCTAVE_GAIN;
+  octave.connect(octaveGain);
+  octaveGain.connect(master);
+
+  const tine = audioContext.createOscillator();
+  tine.type = 'sine';
+  tine.frequency.setValueAtTime(baseFreq * TINE_RATIO, when);
+  const tineGain = audioContext.createGain();
+  tineGain.gain.setValueAtTime(Math.max(peakGain * TINE_PEAK_RATIO, MIN_GAIN), when);
+  tineGain.gain.exponentialRampToValueAtTime(MIN_GAIN, when + TINE_DECAY_SECONDS);
+  tine.connect(tineGain);
+  tineGain.connect(master);
+
+  const tremolo = audioContext.createOscillator();
+  tremolo.type = 'sine';
+  tremolo.frequency.setValueAtTime(TREMOLO_HZ, when);
+  const tremoloDepth = audioContext.createGain();
+  tremoloDepth.gain.value = peakGain * TREMOLO_DEPTH_RATIO;
+  tremolo.connect(tremoloDepth);
+  tremoloDepth.connect(master.gain);
+
+  const oscillators = [fundamental, octave, tine, tremolo];
+  oscillators.forEach((osc) => osc.start(when));
+  return oscillators;
+}
 
 const CLICK_FREQUENCY = { strong: 1500, weak: 900, off: 700 }; // downbeat, other beats, and the eighth-note in between
 const CLICK_GAIN = { strong: 0.25, weak: 0.15, off: 0.06 }; // off-beat is deliberately much quieter -- a subtle subdivision guide, not a fourth accent level
@@ -75,17 +146,7 @@ export function playNoteAt(pitch, velocity, when) {
   master.gain.exponentialRampToValueAtTime(Math.max(peakGain * 0.15, 0.0001), when + 0.6);
   master.connect(audioContext.destination);
 
-  const oscillators = HARMONICS.map((multiple, i) => {
-    const osc = audioContext.createOscillator();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(baseFreq * multiple, when);
-    const harmonicGain = audioContext.createGain();
-    harmonicGain.gain.value = HARMONIC_GAINS[i];
-    osc.connect(harmonicGain);
-    harmonicGain.connect(master);
-    osc.start(when);
-    return osc;
-  });
+  const oscillators = connectRhodesPartials(baseFreq, when, master, peakGain);
 
   activeVoices.set(pitch, { oscillators, master });
 }
@@ -139,18 +200,8 @@ export function playNoteForDuration(pitch, velocity, when, durationSeconds) {
   master.gain.linearRampToValueAtTime(0, releaseEnd); // true silence, not the 0.0001 floor -- no truncation click when the oscillator stops
   master.connect(audioContext.destination);
 
-  const oscillators = HARMONICS.map((multiple, i) => {
-    const osc = audioContext.createOscillator();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(baseFreq * multiple, when);
-    const harmonicGain = audioContext.createGain();
-    harmonicGain.gain.value = HARMONIC_GAINS[i];
-    osc.connect(harmonicGain);
-    harmonicGain.connect(master);
-    osc.start(when);
-    osc.stop(releaseEnd + 0.02);
-    return osc;
-  });
+  const oscillators = connectRhodesPartials(baseFreq, when, master, peakGain);
+  oscillators.forEach((osc) => osc.stop(releaseEnd + 0.02));
 
   const voice = { oscillators, master };
   scheduledVoices.add(voice);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   clipOverlappingNotes,
   clusterOnsets,
+  describeChordTones,
   detectChordQuality,
   detectChords,
   dropAccidentalTouches,
@@ -37,23 +38,43 @@ describe('formatChordSymbol', () => {
     expect(formatChordSymbol(0, 'dim7')).toBe('Cdim7');
     expect(formatChordSymbol(0, 'minMaj7')).toBe('Cm(maj7)');
   });
+
+  it('appends slash notation when the bass differs from the root', () => {
+    expect(formatChordSymbol(0, 'maj', 4)).toBe('C/E'); // C major over E -- 1st inversion
+    expect(formatChordSymbol(0, 'maj', 7)).toBe('C/G'); // 2nd inversion
+    expect(formatChordSymbol(0, 'maj', 2)).toBe('C/D'); // a foreign (non-chord-tone) bass
+  });
+
+  it('omits the slash when the bass is the root itself, or not given at all', () => {
+    expect(formatChordSymbol(0, 'maj', 0)).toBe('C');
+    expect(formatChordSymbol(0, 'maj', null)).toBe('C');
+    expect(formatChordSymbol(0, 'maj')).toBe('C');
+  });
 });
 
 describe('parseChordSymbol', () => {
   it('is the exact inverse of formatChordSymbol for every recognized quality, at every root', () => {
-    const qualities = ['maj', 'min', 'dim', 'aug', 'dom7', 'maj7', 'min7', 'm7b5', 'dim7', 'minMaj7'];
+    const qualities = ['maj', 'min', 'dim', 'aug', 'sus2', 'sus4', 'dom7', 'maj7', 'min7', 'm7b5', 'dim7', 'minMaj7', 'maj6', 'min6', 'dom9', 'maj9', 'min9'];
     for (let root = 0; root < 12; root++) {
       for (const quality of qualities) {
         const symbol = formatChordSymbol(root, quality);
-        expect(parseChordSymbol(symbol)).toEqual({ rootPitchClass: root, quality });
+        expect(parseChordSymbol(symbol)).toEqual({ rootPitchClass: root, quality, bassPitchClass: root }); // no slash -- bass defaults to the root itself
       }
     }
   });
 
+  it('parses slash notation back into a distinct bassPitchClass', () => {
+    expect(parseChordSymbol('C/E')).toEqual({ rootPitchClass: 0, quality: 'maj', bassPitchClass: 4 });
+    expect(parseChordSymbol('C/D')).toEqual({ rootPitchClass: 0, quality: 'maj', bassPitchClass: 2 });
+    expect(parseChordSymbol('F#m7/A')).toEqual({ rootPitchClass: 6, quality: 'min7', bassPitchClass: 9 });
+  });
+
   it('returns null for a symbol that is not one of this app\'s own recognized shapes', () => {
-    expect(parseChordSymbol('Csus4')).toBeNull();
+    expect(parseChordSymbol('Cadd9')).toBeNull(); // add9 (no 7th) isn't in this app's vocabulary, unlike a full 9th chord
+    expect(parseChordSymbol('C11')).toBeNull(); // 11ths/13ths are out of scope -- see FIVE_NOTE_INTERVALS's own comment
     expect(parseChordSymbol('H')).toBeNull(); // not a real note letter
     expect(parseChordSymbol('')).toBeNull();
+    expect(parseChordSymbol('C/H')).toBeNull(); // unrecognized bass note letter
   });
 });
 
@@ -107,8 +128,21 @@ describe('detectChordQuality', () => {
   });
 
   it('recognizes half-diminished and diminished 7th chords', () => {
-    expect(detectChordQuality([11, 2, 5, 9])).toEqual({ rootPitchClass: 11, quality: 'm7b5' }); // Bm7b5
+    // {11, 2, 5, 9} is also, by pitch class alone, a D minor 6th chord
+    // (see the dedicated test below) -- the bass hint picks B here.
+    expect(detectChordQuality([11, 2, 5, 9], 11)).toEqual({ rootPitchClass: 11, quality: 'm7b5' }); // Bm7b5
     expect(detectChordQuality([0, 3, 6, 9])).toEqual({ rootPitchClass: 0, quality: 'dim7' });
+  });
+
+  it('shares its 4 pitch classes with a minor 6th chord a minor 3rd below its root -- a real, textbook ambiguity', () => {
+    // Bm7b5 (B-D-F-A) and Dm6 (D-F-A-B) are the exact same 4 notes --
+    // a half-diminished 7th and the minor 6th chord built on its own
+    // 6th degree always coincide this way (this is the same relation
+    // as, e.g., Am7b5/Cm6). Without a bass hint this is genuinely
+    // ambiguous, same as an augmented triad or diminished 7th -- the
+    // bass note picks which one was actually meant.
+    expect(detectChordQuality([11, 2, 5, 9], 11)).toEqual({ rootPitchClass: 11, quality: 'm7b5' });
+    expect(detectChordQuality([11, 2, 5, 9], 2)).toEqual({ rootPitchClass: 2, quality: 'min6' });
   });
 
   it("uses the bass note to resolve a diminished 7th's inherent (4-way) symmetry", () => {
@@ -124,8 +158,37 @@ describe('detectChordQuality', () => {
     expect(detectChordQuality([0, 1, 2, 3])).toBeNull();
   });
 
-  it('returns null for 5 or more distinct pitch classes (outside this app\'s recognized vocabulary)', () => {
-    expect(detectChordQuality([0, 2, 4, 7, 10])).toBeNull();
+  it('recognizes dominant, major, and minor 9th chords (5 distinct pitch classes)', () => {
+    expect(detectChordQuality([0, 2, 4, 7, 10])).toEqual({ rootPitchClass: 0, quality: 'dom9' }); // C9
+    expect(detectChordQuality([0, 2, 4, 7, 11])).toEqual({ rootPitchClass: 0, quality: 'maj9' }); // Cmaj9
+    expect(detectChordQuality([0, 2, 3, 7, 10])).toEqual({ rootPitchClass: 0, quality: 'min9' }); // Cm9
+  });
+
+  it('returns null for 5 distinct pitch classes that are not a recognized 9th chord', () => {
+    expect(detectChordQuality([0, 1, 2, 3, 4])).toBeNull();
+  });
+
+  it('returns null for 6 or more distinct pitch classes (outside this app\'s recognized vocabulary)', () => {
+    expect(detectChordQuality([0, 1, 2, 4, 7, 10])).toBeNull();
+  });
+
+  it('recognizes major/minor 6th chords', () => {
+    expect(detectChordQuality([0, 4, 7, 9])).toEqual({ rootPitchClass: 0, quality: 'maj6' }); // C6
+    expect(detectChordQuality([0, 3, 7, 9])).toEqual({ rootPitchClass: 0, quality: 'min6' }); // Cm6
+  });
+
+  it('recognizes sus2/sus4 triads', () => {
+    expect(detectChordQuality([0, 2, 7])).toEqual({ rootPitchClass: 0, quality: 'sus2' }); // Csus2
+    expect(detectChordQuality([0, 5, 7])).toEqual({ rootPitchClass: 0, quality: 'sus4' }); // Csus4
+  });
+
+  it('uses the bass note to resolve sus2/sus4\'s inherent symmetry (the same 3 notes read either way)', () => {
+    // {0, 5, 7} is both Csus4 (root C) and Fsus2 (root F, a 4th below) --
+    // exactly the same shape by pitch class alone.
+    const bassC = detectChordQuality([0, 5, 7], 0);
+    const bassF = detectChordQuality([0, 5, 7], 5);
+    expect(bassC).toEqual({ rootPitchClass: 0, quality: 'sus4' });
+    expect(bassF).toEqual({ rootPitchClass: 5, quality: 'sus2' });
   });
 });
 
@@ -140,6 +203,63 @@ describe('voiceChordSimple', () => {
 
   it('returns an empty voicing for an unrecognized quality', () => {
     expect(voiceChordSimple(0, 'nonsense')).toEqual([]);
+  });
+
+  it('adds a bass note a full octave below the voicing for a slash chord', () => {
+    expect(voiceChordSimple(0, 'maj', 48, 4)).toEqual([40, 48, 52, 55]); // C/E -- E2, then C3 E3 G3
+  });
+
+  it('adds nothing extra when the bass is the root itself, or not given', () => {
+    expect(voiceChordSimple(0, 'maj', 48, 0)).toEqual([48, 52, 55]);
+    expect(voiceChordSimple(0, 'maj', 48)).toEqual([48, 52, 55]);
+  });
+});
+
+describe('describeChordTones', () => {
+  it('spells out plain triads', () => {
+    expect(describeChordTones('maj')).toEqual(['1', '3', '5']);
+    expect(describeChordTones('min')).toEqual(['1', '♭3', '5']);
+    expect(describeChordTones('dim')).toEqual(['1', '♭3', '♭5']);
+    expect(describeChordTones('aug')).toEqual(['1', '3', '♯5']);
+  });
+
+  it('calls a sus chord\'s replaced tone "2" or "4", not an upper extension', () => {
+    expect(describeChordTones('sus2')).toEqual(['1', '2', '5']);
+    expect(describeChordTones('sus4')).toEqual(['1', '4', '5']);
+  });
+
+  it('spells out 7th and 6th chords', () => {
+    expect(describeChordTones('dom7')).toEqual(['1', '3', '5', '♭7']);
+    expect(describeChordTones('maj7')).toEqual(['1', '3', '5', '7']);
+    expect(describeChordTones('min7')).toEqual(['1', '♭3', '5', '♭7']);
+    expect(describeChordTones('m7b5')).toEqual(['1', '♭3', '♭5', '♭7']);
+    expect(describeChordTones('minMaj7')).toEqual(['1', '♭3', '5', '7']);
+    expect(describeChordTones('maj6')).toEqual(['1', '3', '5', '6']);
+    expect(describeChordTones('min6')).toEqual(['1', '♭3', '5', '6']);
+  });
+
+  it('spells a diminished 7th\'s own 7th as a double-flat 7th, not a plain 6th', () => {
+    // Same semitone distance as maj6/min6's "6" (9 semitones) but a
+    // genuinely different theoretical function -- see this function's
+    // own comment for why.
+    expect(describeChordTones('dim7')).toEqual(['1', '♭3', '♭5', '♭♭7']);
+  });
+
+  it('calls the same whole-step-above-root tone "9" once a chord has a 7th too', () => {
+    expect(describeChordTones('dom9')).toEqual(['1', '3', '5', '♭7', '9']);
+    expect(describeChordTones('maj9')).toEqual(['1', '3', '5', '7', '9']);
+    expect(describeChordTones('min9')).toEqual(['1', '♭3', '5', '♭7', '9']);
+  });
+
+  it('returns an empty list for an unrecognized quality', () => {
+    expect(describeChordTones('nonsense')).toEqual([]);
+  });
+
+  it('always has exactly as many degree labels as voiceChordSimple has notes, for every recognized quality', () => {
+    const qualities = ['maj', 'min', 'dim', 'aug', 'sus2', 'sus4', 'dom7', 'maj7', 'min7', 'm7b5', 'dim7', 'minMaj7', 'maj6', 'min6', 'dom9', 'maj9', 'min9'];
+    for (const quality of qualities) {
+      expect(describeChordTones(quality)).toHaveLength(voiceChordSimple(0, quality).length);
+    }
   });
 });
 
@@ -284,7 +404,7 @@ describe('detectChords', () => {
       { pitch: 55, start: 0.02, end: 4.0 }, // G3
     ];
     const [chord] = detectChords(notes, 0.05);
-    expect(chord).toEqual({ rootPitchClass: 0, quality: 'maj', start: 0.0, end: 4.0 });
+    expect(chord).toEqual({ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0.0, end: 4.0 }); // root-position -- bass is the root, no slash
   });
 
   it('turns a clean 7th-chord cluster (4 notes) into one ChordEvent', () => {
@@ -295,7 +415,76 @@ describe('detectChords', () => {
       { pitch: 53, start: 4.0, end: 7.9 }, // F3
     ];
     const [chord] = detectChords(notes, 0.05);
-    expect(chord).toEqual({ rootPitchClass: 7, quality: 'dom7', start: 4.0, end: 8.0 }); // G7
+    expect(chord).toEqual({ rootPitchClass: 7, quality: 'dom7', bassPitchClass: 7, start: 4.0, end: 8.0 }); // G7
+  });
+
+  it('does not treat a doubled root as a slash chord', () => {
+    // Root doubled an octave below the rest of the voicing -- extremely
+    // common comping (full sound), not a deliberate inversion.
+    const notes = [
+      { pitch: 36, start: 0, end: 4 }, // C2 (doubled root)
+      { pitch: 48, start: 0, end: 4 }, // C3
+      { pitch: 52, start: 0, end: 4 }, // E3
+      { pitch: 55, start: 0, end: 4 }, // G3
+    ];
+    const [chord] = detectChords(notes, 0.05);
+    expect(chord.rootPitchClass).toBe(0);
+    expect(chord.bassPitchClass).toBe(0); // still C -- no slash
+  });
+
+  it('reads an inversion (bass note is one of the chord\'s own tones) as a slash chord', () => {
+    // E3-G3-C4 -- 1st inversion of C major, read as C/E.
+    const notes = [
+      { pitch: 52, start: 0, end: 4 }, // E3
+      { pitch: 55, start: 0, end: 4 }, // G3
+      { pitch: 60, start: 0, end: 4 }, // C4
+    ];
+    const [chord] = detectChords(notes, 0.05);
+    expect(chord.rootPitchClass).toBe(0);
+    expect(chord.quality).toBe('maj');
+    expect(chord.bassPitchClass).toBe(4); // E -- C/E
+  });
+
+  it('reads a 2nd inversion the same way', () => {
+    // G3-C4-E4 -- 2nd inversion of C major, read as C/G.
+    const notes = [
+      { pitch: 55, start: 0, end: 4 }, // G3
+      { pitch: 60, start: 0, end: 4 }, // C4
+      { pitch: 64, start: 0, end: 4 }, // E4
+    ];
+    const [chord] = detectChords(notes, 0.05);
+    expect(chord.rootPitchClass).toBe(0);
+    expect(chord.bassPitchClass).toBe(7); // G -- C/G
+  });
+
+  it('reads a foreign bass note (not one of the chord\'s own tones) as a slash chord', () => {
+    // D2 in the bass, C-E-G triad above it -- the combined set {D,C,E,G}
+    // spells no known triad/7th on its own, but C-E-G alone is a clean
+    // C major -- read as C/D.
+    const notes = [
+      { pitch: 38, start: 0, end: 4 }, // D2
+      { pitch: 60, start: 0, end: 4 }, // C4
+      { pitch: 64, start: 0, end: 4 }, // E4
+      { pitch: 67, start: 0, end: 4 }, // G4
+    ];
+    const [chord] = detectChords(notes, 0.05);
+    expect(chord.rootPitchClass).toBe(0);
+    expect(chord.quality).toBe('maj');
+    expect(chord.bassPitchClass).toBe(2); // D -- C/D
+  });
+
+  it('recognizes an octave-doubled bass note (not just a single note) as the bass group', () => {
+    // D2 and D3 both in the bass (an octave apart), C-E-G above -- still C/D.
+    const notes = [
+      { pitch: 38, start: 0, end: 4 }, // D2
+      { pitch: 50, start: 0, end: 4 }, // D3
+      { pitch: 60, start: 0, end: 4 }, // C4
+      { pitch: 64, start: 0, end: 4 }, // E4
+      { pitch: 67, start: 0, end: 4 }, // G4
+    ];
+    const [chord] = detectChords(notes, 0.05);
+    expect(chord.rootPitchClass).toBe(0);
+    expect(chord.bassPitchClass).toBe(2);
   });
 
   it('throws with the beat position and pitches for an unrecognizable cluster', () => {
@@ -305,6 +494,15 @@ describe('detectChords', () => {
       { pitch: 50, start: 2.0, end: 3.0 },
     ];
     expect(() => detectChords(notes, 0.05)).toThrow(/beat 2\.00/);
+  });
+
+  it('still throws when neither the whole cluster nor the notes above an isolated bass form a recognized chord', () => {
+    const notes = [
+      { pitch: 38, start: 0, end: 4 }, // D2, isolated bass
+      { pitch: 60, start: 0, end: 4 }, // C4
+      { pitch: 61, start: 0, end: 4 }, // C#4 -- not a recognizable shape either way
+    ];
+    expect(() => detectChords(notes, 0.05)).toThrow(/couldn't recognize a chord/);
   });
 });
 
@@ -334,6 +532,17 @@ describe('mergeConsecutiveChords', () => {
     const chords = [
       { rootPitchClass: 0, quality: 'maj', start: 0, end: 4 }, // C
       { rootPitchClass: 0, quality: 'min', start: 4, end: 8 }, // Cm
+    ];
+    expect(mergeConsecutiveChords(chords)).toEqual(chords);
+  });
+
+  it('treats a bass note change as a real change even when root+quality stay the same', () => {
+    // A walking bass under a held C major -- C, then C/E, then C/G --
+    // is exactly what slash notation exists to show, not a repeat.
+    const chords = [
+      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 }, // C
+      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 4, start: 4, end: 8 }, // C/E
+      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 7, start: 8, end: 12 }, // C/G
     ];
     expect(mergeConsecutiveChords(chords)).toEqual(chords);
   });

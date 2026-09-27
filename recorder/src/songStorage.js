@@ -127,7 +127,7 @@ export function appendSectionData(chartData, { sectionLabel, sectionLengthBeats,
       ...chords.map((c) => ({
         beat: c.start + startBeat,
         duration_beats: c.end - c.start,
-        chord: formatChordSymbol(c.rootPitchClass, c.quality),
+        chord: formatChordSymbol(c.rootPitchClass, c.quality, c.bassPitchClass),
         section: sectionLabel,
       })),
     ],
@@ -245,7 +245,7 @@ export function replaceSectionData(chartData, sectionIndex, { sectionLengthBeats
       chords.map((c) => ({
         beat: c.start + startBeat,
         duration_beats: c.end - c.start,
-        chord: formatChordSymbol(c.rootPitchClass, c.quality),
+        chord: formatChordSymbol(c.rootPitchClass, c.quality, c.bassPitchClass),
         section: targetSection.label,
       }))
     ),

@@ -99,6 +99,7 @@ export default function RecordSongFlow({ mode = 'newSong', baseChartData = null,
   if (screen === 'setup') {
     return (
       <SongSetup
+        initial={song}
         onBack={onCancel}
         onSubmit={(submittedSong) => {
           setSong(submittedSong);

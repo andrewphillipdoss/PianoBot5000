@@ -17,7 +17,7 @@ describe('processChordsPass', () => {
     // Recording was stopped right as the chord was released -- 8 beats captured, no trailing silence.
     const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, 8 * SPB);
 
-    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', start: 0, end: 8 }]);
+    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 8 }]);
     expect(sectionLengthBeats).toBe(16); // 8 real beats rounds up to one 4-bar (16-beat) unit
   });
 
@@ -38,7 +38,7 @@ describe('processChordsPass', () => {
       { timestamp: 5 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
     const { chords } = processChordsPass(messages, TEMPO, 8 * SPB);
-    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', start: 4, end: 5 }]);
+    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 4, end: 5 }]);
   });
 
   it('trims trailing dead air before rounding, using the true capture duration -- not the last note-off', () => {
@@ -60,8 +60,8 @@ describe('processChordsPass', () => {
     const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, 60 * SPB);
 
     expect(chords).toEqual([
-      { rootPitchClass: 0, quality: 'maj', start: 0, end: 4 },
-      { rootPitchClass: 5, quality: 'maj', start: 20, end: 21 },
+      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 },
+      { rootPitchClass: 5, quality: 'maj', bassPitchClass: 5, start: 20, end: 21 },
     ]);
     // Last onset (beat 20) is in bar index 5 -> keeps bars 0-5 (24 beats) -> rounds to the nearest 16 -> 32.
     // Trimming this dead air is exactly the point: without it, 60 beats would round to 64.
@@ -85,7 +85,7 @@ describe('processChordsPass', () => {
     ];
     const { chords } = processChordsPass(messages, TEMPO, 8 * SPB);
     // One merged entry spanning both bars, not two identical "C" entries.
-    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', start: 0, end: 8 }]);
+    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 8 }]);
   });
 
   it('quantizes onto a coarser grid when a coarser subdivision is requested (8th notes)', () => {
@@ -126,8 +126,8 @@ describe('processChordsPass', () => {
     ];
     const { chords } = processChordsPass(messages, TEMPO, 4 * SPB, 2); // 2 subdivisions/beat = 8th notes
     expect(chords).toEqual([
-      { rootPitchClass: 0, quality: 'maj', start: 0, end: 0.5 },
-      { rootPitchClass: 5, quality: 'maj', start: 0.5, end: 1 },
+      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 0.5 },
+      { rootPitchClass: 5, quality: 'maj', bassPitchClass: 5, start: 0.5, end: 1 },
     ]);
   });
 
@@ -161,7 +161,7 @@ describe('processChordsPass', () => {
       { timestamp: 4 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
     const { chords } = processChordsPass(messages, TEMPO, 4 * SPB);
-    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', start: 0, end: 4 }]);
+    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 }]);
   });
 
   it('ignores a barely-touched extra key (very low velocity) the same way', () => {
@@ -176,7 +176,7 @@ describe('processChordsPass', () => {
       { timestamp: 4 * SPB, type: 'noteoff', note: 49, velocity: 0 },
     ];
     const { chords } = processChordsPass(messages, TEMPO, 4 * SPB);
-    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', start: 0, end: 4 }]);
+    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 }]);
   });
 });
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { MidiUnsupportedError, isMidiSupported, listInputs, parseMidiMessage, requestMidiAccess } from './midi.js';
+import { MidiUnsupportedError, isMidiSupported, listInputs, listOutputs, parseMidiMessage, requestMidiAccess, sendNoteOff, sendNoteOn } from './midi.js';
 
 describe('parseMidiMessage', () => {
   it('parses a note-on message', () => {
@@ -80,5 +80,49 @@ describe('listInputs', () => {
 
   it('returns an empty list when nothing is connected', () => {
     expect(listInputs({ inputs: new Map() })).toEqual([]);
+  });
+});
+
+describe('listOutputs', () => {
+  it('returns plain data for every available output port', () => {
+    const fakeAccess = {
+      outputs: new Map([['out-1', { id: 'out-1', name: 'USB MIDI Synth', manufacturer: 'Some Co' }]]),
+    };
+    expect(listOutputs(fakeAccess)).toEqual([{ id: 'out-1', name: 'USB MIDI Synth', manufacturer: 'Some Co' }]);
+  });
+
+  it('returns an empty list when nothing is connected', () => {
+    expect(listOutputs({ outputs: new Map() })).toEqual([]);
+  });
+});
+
+describe('sendNoteOn/sendNoteOff', () => {
+  it('sends a note-on with the given note/velocity on channel 0 by default', () => {
+    const output = { send: vi.fn() };
+    sendNoteOn(output, 60, 100);
+    expect(output.send).toHaveBeenCalledWith([0x90, 60, 100]);
+  });
+
+  it('sends a note-off with velocity 0', () => {
+    const output = { send: vi.fn() };
+    sendNoteOff(output, 60);
+    expect(output.send).toHaveBeenCalledWith([0x80, 60, 0]);
+  });
+
+  it('packs the channel into the low nibble of the status byte', () => {
+    const output = { send: vi.fn() };
+    sendNoteOn(output, 60, 100, 3);
+    expect(output.send).toHaveBeenCalledWith([0x93, 60, 100]);
+  });
+
+  it('clamps note/velocity to a valid MIDI byte range', () => {
+    const output = { send: vi.fn() };
+    sendNoteOn(output, 200, -10);
+    expect(output.send).toHaveBeenCalledWith([0x90, 127, 0]);
+  });
+
+  it('does nothing when no output is selected (null)', () => {
+    expect(() => sendNoteOn(null, 60, 100)).not.toThrow();
+    expect(() => sendNoteOff(null, 60)).not.toThrow();
   });
 });

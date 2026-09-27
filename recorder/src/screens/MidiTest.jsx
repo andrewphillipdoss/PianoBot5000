@@ -11,7 +11,8 @@ import './MidiTest.css';
  * before any real recording UI gets built on top of Web MIDI.
  */
 export default function MidiTest() {
-  const { supported, status, error, inputs, selectedInputId, setSelectedInputId, events, heldNotes } = useMidi();
+  const { supported, status, error, inputs, selectedInputId, setSelectedInputId, outputs, selectedOutputId, setSelectedOutputId, sendNoteOn, sendNoteOff, events, heldNotes } =
+    useMidi();
   const [soundOn, setSoundOn] = useState(false);
   const lastPlayedEventId = useRef(0);
 
@@ -27,16 +28,17 @@ export default function MidiTest() {
     else stopNote(newest.note);
   }, [events, soundOn]);
 
-  // Recognizes triads and 7th chords (this app's current vocabulary --
-  // see theory.js) from whichever pitch classes are currently held,
-  // octave doublings collapsed and ignored, lowest held note as the
-  // tiebreaking bass for the real ambiguities (augmented triads and
-  // diminished 7ths are both symmetric shapes).
+  // Recognizes this app's current chord vocabulary (triads/sus, 6th/7th
+  // chords, 9th chords -- see theory.js) from whichever pitch classes
+  // are currently held, octave doublings collapsed and ignored, lowest
+  // held note as the tiebreaking bass for the real ambiguities
+  // (augmented triads, diminished 7ths, and sus2/sus4 pairs are all
+  // symmetric shapes by pitch class alone).
   const heldChord = useMemo(() => {
     const held = [...heldNotes];
     const pitchClasses = held.map((p) => p % 12);
     const distinctCount = new Set(pitchClasses).size;
-    if (distinctCount !== 3 && distinctCount !== 4) return { chord: null, distinctCount };
+    if (distinctCount < 3 || distinctCount > 5) return { chord: null, distinctCount };
     const bassPitchClass = held.reduce((min, p) => Math.min(min, p), Infinity) % 12;
     return { chord: detectChordQuality(pitchClasses, bassPitchClass), distinctCount };
   }, [heldNotes]);
@@ -104,6 +106,34 @@ export default function MidiTest() {
       )}
 
       <div className="midi-test__panel">
+        <span className="midi-test__panel-label">Output device</span>
+        {outputs.length === 0 ? (
+          <span className="midi-test__chord-hint">No output devices found -- notes only play through this app's own synth.</span>
+        ) : (
+          <>
+            <select className="midi-test__select" value={selectedOutputId ?? ''} onChange={(e) => setSelectedOutputId(e.target.value || null)}>
+              <option value="">None (this app's synth only)</option>
+              {outputs.map((output) => (
+                <option key={output.id} value={output.id}>
+                  {output.name} {output.manufacturer ? `(${output.manufacturer})` : ''}
+                </option>
+              ))}
+            </select>
+            <button
+              className="midi-test__select"
+              disabled={!selectedOutputId}
+              onClick={() => {
+                sendNoteOn(60, 100);
+                setTimeout(() => sendNoteOff(60), 300);
+              }}
+            >
+              Send test note (middle C)
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="midi-test__panel">
         <span className="midi-test__panel-label">Currently held</span>
         <div className="midi-test__held-notes">
           {heldNotes.size === 0 ? (
@@ -124,10 +154,10 @@ export default function MidiTest() {
           <span className="midi-test__chord-symbol">{formatChordSymbol(heldChord.chord.rootPitchClass, heldChord.chord.quality)}</span>
         ) : (
           <span className="midi-test__chord-hint">
-            {heldChord.distinctCount === 0 && 'Hold a chord (3-4 notes)...'}
+            {heldChord.distinctCount === 0 && 'Hold a chord (3-5 notes)...'}
             {heldChord.distinctCount > 0 && heldChord.distinctCount < 3 && `${heldChord.distinctCount} of 3 notes held`}
-            {(heldChord.distinctCount === 3 || heldChord.distinctCount === 4) && 'Not a recognizable chord -- check for a wrong/extra note'}
-            {heldChord.distinctCount > 4 && `${heldChord.distinctCount} distinct notes held -- only triads/7th chords are recognized`}
+            {heldChord.distinctCount >= 3 && heldChord.distinctCount <= 5 && 'Not a recognizable chord -- check for a wrong/extra note'}
+            {heldChord.distinctCount > 5 && `${heldChord.distinctCount} distinct notes held -- only up to 9th chords are recognized`}
           </span>
         )}
       </div>

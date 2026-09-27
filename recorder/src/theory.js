@@ -10,28 +10,57 @@
  * server-side in the existing Python CLI).
  */
 
-// Triad intervals in semitones above the root -- the same table
-// pianobot5000's theory.py uses to *voice* a chord; here we use it in
-// reverse, to *recognize* one from the pitch classes actually played.
+// Triad ("3-note chord," in the loose sense that includes sus chords
+// even though they're not strictly tertian) intervals in semitones
+// above the root -- the same table pianobot5000's theory.py uses to
+// *voice* a chord; here we use it in reverse, to *recognize* one from
+// the pitch classes actually played. sus2/sus4 replace the 3rd with a
+// major 2nd/perfect 4th -- standard chord vocabulary (see e.g. Kostka &
+// Payne, Tonal Harmony), just not tertian, which is why they're not
+// "major/minor/diminished/augmented" like the rest of this table.
+//
+// sus2 and sus4 are also each other's pitch-class set from a different
+// root by construction -- {C,F,G} is both Csus4 (root C, a 4th above)
+// and Fsus2 (root F, a 2nd below its own 5th) -- exactly the same
+// symmetric-shape ambiguity augmented triads and diminished 7ths
+// already have below; `detectChordQuality`'s bassPitchClass tie-break
+// resolves it exactly the same way, for free.
 export const TRIAD_INTERVALS = {
   maj: [0, 4, 7],
   min: [0, 3, 7],
   dim: [0, 3, 6],
   aug: [0, 4, 8],
+  sus2: [0, 2, 7],
+  sus4: [0, 5, 7],
 };
 
-// Seventh-chord intervals -- same idea, one more note. Covers the
-// vocabulary that actually shows up in hymns/standards (dominant,
-// major, and minor 7ths, half-diminished, diminished); genuinely
-// exotic shapes (9ths, sus chords, true slash chords) are left out on
-// purpose -- see the recorder's design discussion for why.
-export const SEVENTH_INTERVALS = {
+// Four-distinct-pitch-class shapes: the standard 7th chords (dominant,
+// major, minor, half-diminished, diminished, minor-major) plus the two
+// 6th chords (a major/minor triad with an added 6th instead of a 7th --
+// standard in both classical and jazz vocabulary, common as a final
+// "home" chord in a way a plain triad sometimes isn't).
+export const FOUR_NOTE_INTERVALS = {
   dom7: [0, 4, 7, 10],
   maj7: [0, 4, 7, 11],
   min7: [0, 3, 7, 10],
   m7b5: [0, 3, 6, 10], // half-diminished
   dim7: [0, 3, 6, 9],
   minMaj7: [0, 3, 7, 11],
+  maj6: [0, 4, 7, 9],
+  min6: [0, 3, 7, 9],
+};
+
+// Five-distinct-pitch-class shapes: 7th chords with an added 9th (a
+// major 2nd, an octave up -- 14 semitones, mod 12 = 2) stacked on top.
+// The extended-tertian vocabulary genuinely keeps going past this
+// (11ths, 13ths -- see e.g. Mark Levine, The Jazz Theory Book), but
+// those need 6-7 distinct pitch classes, which a 10-fingered piano
+// chord essentially never actually produces in one cluster -- there's
+// a real, low ceiling on how much of this vocabulary is worth chasing.
+export const FIVE_NOTE_INTERVALS = {
+  dom9: [0, 4, 7, 10, 2],
+  maj9: [0, 4, 7, 11, 2],
+  min9: [0, 3, 7, 10, 2],
 };
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -43,13 +72,23 @@ export function midiNoteName(pitch) {
 }
 
 const QUALITY_SUFFIX = {
-  maj: '', min: 'm', dim: 'dim', aug: 'aug',
-  dom7: '7', maj7: 'maj7', min7: 'm7', m7b5: 'm7b5', dim7: 'dim7', minMaj7: 'm(maj7)',
+  maj: '', min: 'm', dim: 'dim', aug: 'aug', sus2: 'sus2', sus4: 'sus4',
+  dom7: '7', maj7: 'maj7', min7: 'm7', m7b5: 'm7b5', dim7: 'dim7', minMaj7: 'm(maj7)', maj6: '6', min6: 'm6',
+  dom9: '9', maj9: 'maj9', min9: 'm9',
 };
 
-/** (root pitch class, quality) -> a plain lead-sheet chord symbol, e.g. (0, "min") -> "Cm". */
-export function formatChordSymbol(rootPitchClass, quality) {
-  return `${NOTE_NAMES[rootPitchClass]}${QUALITY_SUFFIX[quality] ?? quality}`;
+/**
+ * (root pitch class, quality) -> a plain lead-sheet chord symbol, e.g.
+ * (0, "min") -> "Cm". `bassPitchClass`, when given and different from
+ * the root, appends standard slash notation, e.g. (0, "maj", 4) ->
+ * "C/E" -- a C major triad voiced with E (its own 3rd) in the bass, or
+ * just as validly a C triad over some unrelated bass note the player
+ * struck underneath it; the symbol alone can't distinguish those (real
+ * lead sheets can't either), and doesn't need to.
+ */
+export function formatChordSymbol(rootPitchClass, quality, bassPitchClass = null) {
+  const symbol = `${NOTE_NAMES[rootPitchClass]}${QUALITY_SUFFIX[quality] ?? quality}`;
+  return bassPitchClass !== null && bassPitchClass !== rootPitchClass ? `${symbol}/${NOTE_NAMES[bassPitchClass]}` : symbol;
 }
 
 const QUALITY_FROM_SUFFIX = Object.fromEntries(Object.entries(QUALITY_SUFFIX).map(([quality, suffix]) => [suffix, quality]));
@@ -62,14 +101,21 @@ const QUALITY_FROM_SUFFIX = Object.fromEntries(Object.entries(QUALITY_SUFFIX).ma
  * that doesn't parse as one of this app's own recognized symbols
  * (e.g. a hand-edited chart file), rather than throwing -- playback
  * skips a chord it can't make sense of instead of crashing outright.
+ * `bassPitchClass` on the result is always present -- the root itself,
+ * for a plain (non-slash) symbol, so callers that voice a chord never
+ * need to special-case "no slash" as a separate shape from "slash."
  */
 export function parseChordSymbol(symbol) {
-  const rootLength = symbol[1] === '#' ? 2 : 1;
-  const rootPitchClass = NOTE_NAMES.indexOf(symbol.slice(0, rootLength));
+  const [chordPart, bassPart] = symbol.split('/');
+  const rootLength = chordPart[1] === '#' ? 2 : 1;
+  const rootPitchClass = NOTE_NAMES.indexOf(chordPart.slice(0, rootLength));
   if (rootPitchClass === -1) return null;
-  const quality = QUALITY_FROM_SUFFIX[symbol.slice(rootLength)];
+  const quality = QUALITY_FROM_SUFFIX[chordPart.slice(rootLength)];
   if (!quality) return null;
-  return { rootPitchClass, quality };
+  if (bassPart === undefined) return { rootPitchClass, quality, bassPitchClass: rootPitchClass };
+  const bassPitchClass = NOTE_NAMES.indexOf(bassPart);
+  if (bassPitchClass === -1) return null;
+  return { rootPitchClass, quality, bassPitchClass };
 }
 
 function matchesAgainst(pcSet, intervalTable) {
@@ -89,23 +135,30 @@ function matchesAgainst(pcSet, intervalTable) {
  * The reverse of chord voicing: given the pitch classes actually
  * played (0-11, octave-independent) plus optionally which one was the
  * physical bass note, figure out which root + quality they spell --
- * a triad (3 distinct pitch classes, against TRIAD_INTERVALS) or a
- * seventh chord (4, against SEVENTH_INTERVALS). Returns null for
- * anything else (wrong note count, or an interval pattern that
+ * a 3-note chord (against TRIAD_INTERVALS), a 4-note chord (against
+ * FOUR_NOTE_INTERVALS), or a 5-note chord (against FIVE_NOTE_INTERVALS),
+ * purely by how many *distinct* pitch classes were played. Returns null
+ * for anything else (wrong note count, or an interval pattern that
  * doesn't match a known shape) -- there's a real, finite vocabulary
  * of recognized chords, not "any combination of notes."
  *
- * `bassPitchClass` breaks the real ambiguities in that vocabulary:
- * an augmented triad and a diminished 7th are both *symmetric*
- * (every one of their notes is an equally valid "root" by pure
- * interval pattern alone -- e.g. {C, E, G#} is C augmented, E
- * augmented, and G# augmented all at once), so preferring whichever
- * candidate's root is the actual lowest note played resolves it the
- * way a real musician would read it off the keys.
+ * `bassPitchClass` breaks the real ambiguities in that vocabulary. Some
+ * are one shape being symmetric with itself: an augmented triad, a
+ * diminished 7th, and a sus2/sus4 pair are all *symmetric* (every one
+ * of their notes is an equally valid "root" by pure interval pattern
+ * alone -- e.g. {C, E, G#} is C augmented, E augmented, and G#
+ * augmented all at once). Others are two genuinely *different* shapes
+ * landing on the same pitch classes from different roots: a
+ * half-diminished 7th always shares its 4 notes with the minor 6th
+ * chord built a minor 3rd below its root (B-D-F-A is both Bm7b5 and
+ * Dm6) -- a real, textbook relationship, not a bug in this table.
+ * Either way, preferring whichever candidate's root is the actual
+ * lowest note played resolves it the way a real musician would read it
+ * off the keys.
  */
 export function detectChordQuality(pitchClasses, bassPitchClass = null) {
   const pcSet = new Set(pitchClasses);
-  const intervalTable = pcSet.size === 3 ? TRIAD_INTERVALS : pcSet.size === 4 ? SEVENTH_INTERVALS : null;
+  const intervalTable = pcSet.size === 3 ? TRIAD_INTERVALS : pcSet.size === 4 ? FOUR_NOTE_INTERVALS : pcSet.size === 5 ? FIVE_NOTE_INTERVALS : null;
   if (!intervalTable) return null;
 
   const matches = matchesAgainst(pcSet, intervalTable);
@@ -203,29 +256,77 @@ export function clusterOnsets(notes, thresholdBeats = 0.15) {
 }
 
 /**
+ * The pitch class of the note(s) at the very bottom of a cluster, if
+ * they're distinguishable as their own "bass note" group -- a single
+ * low note, or that same note doubled an octave (or several) up,
+ * exactly what a player's left hand plays as a bass note under a chord
+ * voiced above it. Concretely: every note from the bottom that shares
+ * the lowest note's own pitch class, with nothing of a *different*
+ * pitch class below the first note that isn't. Returns null only if
+ * the whole cluster is a single pitch class (which isn't a chord at
+ * all, so `detectChords` below never actually gets there).
+ *
+ * This says nothing yet about whether that note is slash-worthy --
+ * only that it's *structurally* separate from whatever's played above
+ * it. A plain root-position chord (bass note = the chord's own root,
+ * doubled or not) passes through this exactly the same way a real
+ * slash chord does; `detectChords` decides slash-worthiness by
+ * comparing this against the chord's actual detected root afterward.
+ */
+function isolatedBassPitchClass(sortedPitches) {
+  const lowPitchClass = sortedPitches[0] % 12;
+  let i = 1;
+  while (i < sortedPitches.length && sortedPitches[i] % 12 === lowPitchClass) i++;
+  return i < sortedPitches.length ? lowPitchClass : null;
+}
+
+/**
  * Turn a captured left-hand (chords) take into ChordEvents. Each
- * cluster's pitch classes must form a recognizable triad or seventh
- * chord (see `detectChordQuality`) -- a cluster that doesn't is a
- * real problem with the take (an extra/missing note), so this throws
- * with the beat position and pitches involved rather than silently
- * guessing, so the UI can point at exactly what to re-record.
+ * cluster's pitch classes must form a recognizable chord shape (see
+ * `detectChordQuality`) -- a cluster that doesn't is a real problem
+ * with the take (an extra/missing note, or something further outside
+ * this app's chord vocabulary than a slash chord can explain), so this
+ * throws with the beat position and pitches involved rather than
+ * silently guessing, so the UI can point at exactly what to re-record.
+ *
+ * `bassPitchClass` on the result names the isolated bass note (see
+ * above) whenever the cluster has one -- `formatChordSymbol` shows it
+ * as a slash chord only when it differs from the detected root, so a
+ * plain root-position voicing (by far the common case) is unaffected.
+ * Two whole-cluster shapes are recognized:
+ *   - The bass note *is* one of the chord's own tones, just voiced
+ *     lowest (a genuine inversion, e.g. E-G-C read as C/E) or simply
+ *     doubled under a root-position chord (no slash, same as always)
+ *     -- the combined pitch-class set alone already spells a known
+ *     triad/7th, so this is tried first and covers both.
+ *   - The bass note is *foreign* to the chord above it entirely (e.g.
+ *     a C triad over a D bass, common in hymns/pop) -- the combined
+ *     set doesn't spell anything recognizable, but the notes *above*
+ *     the isolated bass, on their own, might.
  */
 export function detectChords(notes, thresholdBeats = 0.15) {
   return clusterOnsets(notes, thresholdBeats).map((cluster) => {
+    const pitches = cluster.map((n) => n.pitch).sort((a, b) => a - b);
     const pitchClasses = cluster.map((n) => n.pitch % 12);
-    const bass = cluster.reduce((min, n) => (n.pitch < min.pitch ? n : min));
-    const detected = detectChordQuality(pitchClasses, bass.pitch % 12);
+    const isolatedBass = isolatedBassPitchClass(pitches);
+
+    let detected = detectChordQuality(pitchClasses, pitches[0] % 12);
+    if (!detected && isolatedBass !== null) {
+      const upperPitchClasses = [...new Set(pitches.filter((p) => p % 12 !== isolatedBass).map((p) => p % 12))];
+      detected = detectChordQuality(upperPitchClasses);
+    }
+
     if (!detected) {
-      const pitches = [...cluster].sort((a, b) => a.pitch - b.pitch).map((n) => n.pitch);
       throw new Error(
         `couldn't recognize a chord at beat ${cluster[0].start.toFixed(2)}: pitches ` +
           `[${pitches.join(', ')}] (pitch classes [${[...new Set(pitchClasses)].sort((a, b) => a - b).join(', ')}]) -- ` +
-          'expected 3 distinct pitch classes forming a maj/min/dim/aug triad, or 4 forming a recognized 7th chord'
+          'expected 3 distinct pitch classes forming a triad/sus chord, 4 forming a 7th/6th chord, or 5 forming a 9th chord'
       );
     }
     return {
       rootPitchClass: detected.rootPitchClass,
       quality: detected.quality,
+      bassPitchClass: isolatedBass ?? detected.rootPitchClass,
       start: Math.min(...cluster.map((n) => n.start)),
       end: Math.max(...cluster.map((n) => n.end)),
     };
@@ -234,19 +335,27 @@ export function detectChords(notes, thresholdBeats = 0.15) {
 
 /**
  * Merge neighboring ChordEvents that are actually the same chord (same
- * root + quality) into one longer entry. A chord re-struck for
+ * root + quality + bass) into one longer entry. A chord re-struck for
  * rhythmic emphasis, or a sustain that happened to get detected as two
  * separate onsets, isn't a real chord *change* -- it shouldn't be
  * counted as one or drawn as a repeat of the same symbol; the merged
  * entry just extends to cover the combined duration. Only ever merges
  * immediate neighbors in the sequence -- the same chord coming back
  * later, with something else in between, is a real repeat, not this.
+ *
+ * Bass has to match too, not just root/quality: a walking bass under a
+ * held chord (C, then C/E, then C/G) is exactly the kind of thing
+ * slash notation exists to show, so it's a real change even though the
+ * harmony above it never moved -- `bassPitchClass` being absent on
+ * both sides (older data, or a caller not tracking it) compares equal
+ * to itself either way, so this doesn't change behavior for anything
+ * that never had the concept.
  */
 export function mergeConsecutiveChords(chords) {
   const merged = [];
   for (const chord of chords) {
     const prev = merged[merged.length - 1];
-    if (prev && prev.rootPitchClass === chord.rootPitchClass && prev.quality === chord.quality) {
+    if (prev && prev.rootPitchClass === chord.rootPitchClass && prev.quality === chord.quality && prev.bassPitchClass === chord.bassPitchClass) {
       prev.end = chord.end;
     } else {
       merged.push({ ...chord });
@@ -282,13 +391,66 @@ const DEFAULT_VOICING_BASE_MIDI = 48; // C3
  * a detected chord -- not the arranger's voice-leading logic (that
  * chooses inversions to minimize movement between chords), just
  * enough to make a recorded chord audible when it plays back during
- * the melody pass.
+ * the melody pass. `bassPitchClass`, when given and different from
+ * the root (a slash chord), adds one more note a full octave below
+ * `baseOctaveMidi` -- below every other note in the voicing, exactly
+ * where a real bass note belongs -- rather than trying to fold it into
+ * the close-position voicing itself.
  */
-export function voiceChordSimple(rootPitchClass, quality, baseOctaveMidi = DEFAULT_VOICING_BASE_MIDI) {
-  const intervals = TRIAD_INTERVALS[quality] ?? SEVENTH_INTERVALS[quality];
+export function voiceChordSimple(rootPitchClass, quality, baseOctaveMidi = DEFAULT_VOICING_BASE_MIDI, bassPitchClass = null) {
+  const intervals = TRIAD_INTERVALS[quality] ?? FOUR_NOTE_INTERVALS[quality] ?? FIVE_NOTE_INTERVALS[quality];
   if (!intervals) return [];
   const rootMidi = baseOctaveMidi + rootPitchClass;
-  return intervals.map((interval) => rootMidi + interval);
+  const voicing = intervals.map((interval) => rootMidi + interval);
+  if (bassPitchClass !== null && bassPitchClass !== rootPitchClass) {
+    voicing.unshift(baseOctaveMidi - 12 + bassPitchClass);
+  }
+  return voicing;
+}
+
+/**
+ * Standard scale-degree names ("1", "b3", "5", "b7", "9", ...) for
+ * each tone of a recognized chord quality, in the same order as
+ * `voiceChordSimple`'s own voicing -- the "insignia" alongside a plain
+ * letter-name chord symbol that shows what each note actually *is*
+ * within the chord (root, third, fifth, seventh...), not just the
+ * chord's name as a whole. Derived straight from this file's own
+ * interval tables (a semitone offset only ever means one thing, with
+ * exactly two standard exceptions handled explicitly below), so there's
+ * one source of truth for a chord's shape, not two tables to keep in
+ * sync by hand.
+ *
+ * The two exceptions: a whole step above the root (2 semitones) is
+ * called "2" in a sus2 triad but "9" once there's a 7th somewhere in
+ * the chord too (an "upper extension," in jazz-theory terms) -- which
+ * one applies is decided by whether `quality` is a 3-note (TRIAD_INTERVALS)
+ * or 5-note (FIVE_NOTE_INTERVALS) shape. And a diminished 7th chord's own
+ * 7th is a *diminished* 7th (9 semitones, called "bb7" -- a double
+ * flat) even though that's the exact same semitone distance as a plain
+ * 6th -- true by construction (a fully diminished 7th chord stacks
+ * three minor 3rds: 0, 3, 6, 9), not a simplification.
+ */
+export function describeChordTones(quality) {
+  const intervals = TRIAD_INTERVALS[quality] ?? FOUR_NOTE_INTERVALS[quality] ?? FIVE_NOTE_INTERVALS[quality];
+  if (!intervals) return [];
+  const isTriad = quality in TRIAD_INTERVALS;
+  return intervals.map((interval) => {
+    if (quality === 'dim7' && interval === 9) return '♭♭7';
+    switch (interval) {
+      case 0: return '1';
+      case 2: return isTriad ? '2' : '9';
+      case 3: return '♭3';
+      case 4: return '3';
+      case 5: return '4';
+      case 6: return '♭5';
+      case 7: return '5';
+      case 8: return '♯5';
+      case 9: return '6';
+      case 10: return '♭7';
+      case 11: return '7';
+      default: return `${interval}`;
+    }
+  });
 }
 
 /** Round a beat length to the nearest multiple of `intervalBars` bars (default: 4). */

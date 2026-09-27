@@ -256,8 +256,9 @@ describe('sectionChordsAsInternal', () => {
     // Give it a real offset (a non-zero start_beat) by appending a second section too, then read the FIRST section's chords back.
     const withB = appendSectionData(chartData, { sectionLabel: 'B', sectionLengthBeats: 8, chords: internalChords, melody: [] });
 
-    expect(sectionChordsAsInternal(withB, withB.sections[0])).toEqual(internalChords);
-    expect(sectionChordsAsInternal(withB, withB.sections[1])).toEqual(internalChords);
+    const expectedChords = internalChords.map((c) => ({ ...c, bassPitchClass: c.rootPitchClass })); // round-tripped through a plain (non-slash) symbol -- bass defaults to the root
+    expect(sectionChordsAsInternal(withB, withB.sections[0])).toEqual(expectedChords);
+    expect(sectionChordsAsInternal(withB, withB.sections[1])).toEqual(expectedChords);
   });
 });
 

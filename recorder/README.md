@@ -18,7 +18,10 @@ change since:
 1. **My Songs** -- lists every chart JSON file in a folder you pick once
    (remembered across reloads via IndexedDB; re-grant permission with one
    click if the browser ever forgets).
-2. **Add a Song** -- title/key/tempo/time signature, once per song.
+2. **Add a Song** -- title/key/tempo/time signature, once per song
+   (pre-filled from whatever was already typed if you back out of
+   Record Chords to here -- this screen used to always reset to blank
+   defaults on remount, silently discarding anything already entered).
    Time signature (2/4 through 6/4 -- compound meters like 6/8 aren't
    modeled separately, pick whichever beat count reads naturally) sets
    the count-in length, the metronome's accent pattern, and the default
@@ -37,8 +40,16 @@ change since:
    useful for chords especially -- a coarser grid than the 8th-note
    default for a song whose chords never change faster than once a beat.
 3. **Record Chords** -- Space (or click) starts a count-in, then records;
-   Space again stops. Live feedback: held notes + the detected chord
-   (triads and 7th chords -- dom7/maj7/min7/m7b5/dim7/minMaj7). The
+   Space again stops. Live feedback: held notes + the detected chord --
+   triads, sus2/sus4, 6th chords, 7th chords (dom7/maj7/min7/m7b5/dim7/
+   minMaj7), and 9th chords (dom9/maj9/min9), plus slash notation
+   (`C/E`) whenever the lowest note(s) held read as a distinct bass note
+   rather than as part of the chord voicing itself -- see below for how.
+   Every chord symbol shown anywhere in the app (here, Chords review,
+   Section Complete, Song view) also carries a small second line of
+   scale-degree "insignia" underneath it (e.g. `1 3 5 b7` under
+   `Cdom7`) -- what each note in the chord actually *is*, not just the
+   chord's name as a whole (`describeChordTones` in theory.js). The
    metronome clicks the beat (strong on the downbeat) plus a much
    quieter eighth-note subdivision in between, so the off-the-beat feel
    is easier to place while playing. Tempo is editable right here too
@@ -190,6 +201,79 @@ safety net under that, for the case where enough short chords' `min-width`
 floors alone add up past the panel's actual width even within one
 nominally-fitting row.
 
+**Slash chords are detected from the chords pass itself, not a separate
+take** (`detectChords`/`isolatedBassPitchClass` in theory.js) -- the
+notes at the very bottom of a struck cluster are read as a distinct
+"bass note" whenever they're a single note or that same note doubled
+an octave (or several) up, exactly what a left hand plays as a bass
+note under a right-hand voicing. Two shapes are recognized: the bass
+note can be one of the chord's own tones just voiced lowest (a genuine
+inversion, e.g. E-G-C read as `C/E`) -- the combined pitch-class set
+already spells a known chord, so this is tried first, and also quietly
+covers a doubled root under a full chord (no slash, since bass equals
+root) -- or the bass can be *foreign* to the chord entirely (e.g. a C
+triad over a D bass, common in hymns/pop, written `C/D`), where the
+combined set spells nothing recognizable but the notes above the
+isolated bass, on their own, do. A walking bass under one held chord
+(`C`, then `C/E`, then `C/G`) is treated as a real chord change, not a
+repeat, for exactly the same reason slash notation exists in the first
+place. Playback (`voiceChordSimple`) adds the bass note back in a full
+octave below the rest of the voicing, both for song playback and for
+the chords heard playing under you while recording the melody pass.
+
+**The recognized chord vocabulary reaches past plain triads/7ths** --
+sus2/sus4 (a triad with its 3rd replaced), major/minor 6th chords, and
+full 9th chords (a 7th chord plus a 9th) are all standard chord
+vocabulary (see e.g. Kostka & Payne, *Tonal Harmony*, for roman-numeral/
+triad theory, and Mark Levine, *The Jazz Theory Book*, for the
+extended/6th/sus vocabulary) that a plain triad-or-7th-only recognizer
+would reject outright as "not a chord." Recognition dispatches purely
+by how many *distinct* pitch classes were played (3, 4, or 5), then
+matches against that size's own interval table -- widening the
+vocabulary only ever means adding another entry to one of those tables,
+in `theory.js`. This surfaces a couple of genuine, textbook harmonic
+ambiguities along the way, on top of the augmented-triad/diminished-7th
+symmetry that already existed: a sus2 and a sus4 chord can be the exact
+same 3 notes read from a different root (`Csus4` = C-F-G = `Fsus2`),
+and a half-diminished 7th always shares its 4 notes with the minor 6th
+chord built a minor 3rd below its own root (`Bm7b5` = B-D-F-A =
+`Dm6`) -- both resolved the same way the existing symmetric cases
+already were, by preferring whichever candidate's root is the actual
+bass note played. 11ths/13ths are deliberately left out -- they'd need
+6-7 distinct pitch classes, which a piano chord struck by two hands
+essentially never actually produces in one cluster, so there's a real,
+low ceiling on how much further this vocabulary is worth chasing.
+
+**The synthesized instrument voice aims for a Rhodes-ish electric piano
+character, not a generic bell tone** (`connectRhodesPartials` in
+pianoSynth.js) -- a plain sine fundamental, a quiet octave partial for
+body, and a "tine" partial a hair sharp of a pure 3rd harmonic (real
+tine-and-pickup electric pianos are never perfectly harmonic, and that
+slight sharpness is a lot of what reads as "electric" rather than
+"bell") that decays out on its own short, fixed schedule regardless of
+how long the note is held -- the bright, percussive "bark" of a real
+Rhodes attack settling into a plainer sustained tone. A quiet, slow
+tremolo (the classic Rhodes vibrato/tremolo switch) is layered on top.
+All of this is still built from the same click-free, fully analytic
+gain envelope architecture the piano voice already had -- see
+pianoSynth.js's own docstring for why that constraint exists and how it
+stays satisfied.
+
+**MIDI input has been reachable from any screen since `MidiProvider`
+started wrapping the whole app; output now is too** (`midi.js`'s
+`listOutputs`/`sendNoteOn`/`sendNoteOff`, exposed from `useMidi()`
+alongside input) -- a real MIDI output port (a hardware synth/module, or
+a DAW) can be picked the same way an input is, and any screen can send
+notes to it via `useMidi().sendNoteOn`/`sendNoteOff`, as an alternative
+to this app's own synthesized voice. Unlike input (where this app always
+needs *something* selected for recording to work at all, so it falls
+back to the first available port), output starts and stays unselected
+until deliberately picked -- silently sending notes to whatever external
+device happened to enumerate first would be a far more surprising
+default than silently listening to the wrong keyboard. The MIDI Test
+screen has a minimal picker + a "send test note" button to prove the
+whole path end to end; nothing else in the app sends to it yet.
+
 **Deliberately out of scope for now** (see the design discussion in this
 repo's history for why): real lead-sheet notation rendering (the
 "toggle to see actual engraved music" view from the design wireframe --
@@ -225,16 +309,20 @@ src/
   chordChartLayout.js     pure: split a section's chords into display
                           rows capped at a max bar count each, with
                           proportional (not per-row-relative) widths
-  pianoSynth.js           the synthesized piano voice + metronome click;
-                          a fully analytic, click-free envelope for
-                          anything scheduled ahead of time (chord backing,
-                          song playback), vs. the simpler live two-call
-                          note-on/note-off path for real-time MIDI input
-  midi.js                 raw Web MIDI access/parsing
+  pianoSynth.js           the synthesized Rhodes-ish electric piano voice
+                          + metronome click; a fully analytic, click-free
+                          envelope for anything scheduled ahead of time
+                          (chord backing, song playback), vs. the simpler
+                          live two-call note-on/note-off path for
+                          real-time MIDI input
+  midi.js                 raw Web MIDI access/parsing (input) and
+                          raw-byte message sending (output)
   hooks/
     MidiProvider.jsx      one shared MIDI connection for the whole app
-                          (port list, selection persisted across
-                          reloads, a raw message tap for recordingSession.js)
+                          (input + output port lists, selection persisted
+                          across reloads, a raw message tap for
+                          recordingSession.js) -- wraps the whole app, so
+                          reachable via useMidi() from any screen
     useRecordingSession.js React glue for recordingSession.js
     useSongPlayback.js    React glue for songPlayback.js
     useSongLibrary.js     React glue for songStorage.js (folder picking/

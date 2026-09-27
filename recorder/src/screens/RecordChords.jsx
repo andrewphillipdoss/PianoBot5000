@@ -50,7 +50,7 @@ export default function RecordChords({ title, sectionLabel, tempo, onTempoChange
     const held = [...midi.heldNotes];
     const pitchClasses = held.map((p) => p % 12);
     const distinctCount = new Set(pitchClasses).size;
-    if (distinctCount !== 3 && distinctCount !== 4) return null;
+    if (distinctCount < 3 || distinctCount > 5) return null;
     const bassPitchClass = held.reduce((min, p) => Math.min(min, p), Infinity) % 12;
     return detectChordQuality(pitchClasses, bassPitchClass);
   }, [midi.heldNotes]);

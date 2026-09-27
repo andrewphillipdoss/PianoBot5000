@@ -9,7 +9,9 @@ import {
   requantizeChartData,
   writeChartToHandle,
 } from '../songStorage.js';
+import { parseChordSymbol } from '../theory.js';
 import ChordChart from './ChordChart.jsx';
+import ChordLabel from './ChordLabel.jsx';
 import MelodyRoll from './MelodyRoll.jsx';
 import QuantizationSelect from './QuantizationSelect.jsx';
 import TimeSignatureSelect from './TimeSignatureSelect.jsx';
@@ -202,7 +204,14 @@ export default function SongView({ song, onBack, onAddSection, onReRecordChords,
               <div key={section.label} style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
                 <div className="panel">
                   <span className="panel-label">Section {section.label} &mdash; {bars} bars</span>
-                  <ChordChart chords={sectionChords} renderLabel={(c) => c.chord} beatsPerBar={beatsPerBar} />
+                  <ChordChart
+                    chords={sectionChords}
+                    renderLabel={(c) => {
+                      const parsed = parseChordSymbol(c.chord);
+                      return parsed ? <ChordLabel {...parsed} /> : c.chord; // an unparseable symbol (e.g. a hand-edited chart file) -- show it plainly rather than crash
+                    }}
+                    beatsPerBar={beatsPerBar}
+                  />
                 </div>
 
                 <div className="panel">

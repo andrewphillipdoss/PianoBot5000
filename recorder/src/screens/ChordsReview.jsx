@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { processChordsPass } from '../recordingPipeline.js';
-import { formatChordSymbol } from '../theory.js';
 import ChordChart from './ChordChart.jsx';
+import ChordLabel from './ChordLabel.jsx';
 import QuantizationSelect from './QuantizationSelect.jsx';
 import TempoInput from './TempoInput.jsx';
 import './shared.css';
@@ -88,7 +88,7 @@ export default function ChordsReview({
 
       <div className="panel">
         <span className="panel-label">Chord chart</span>
-        <ChordChart chords={chords} renderLabel={(chord) => formatChordSymbol(chord.rootPitchClass, chord.quality)} beatsPerBar={beatsPerBar} />
+        <ChordChart chords={chords} renderLabel={(chord) => <ChordLabel {...chord} />} beatsPerBar={beatsPerBar} />
       </div>
 
       <div className="actions-row" style={{ justifyContent: 'flex-end' }}>

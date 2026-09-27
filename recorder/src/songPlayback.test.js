@@ -64,7 +64,7 @@ describe('playSong', () => {
     const chartData = {
       tempo: TEMPO,
       sections: [{ label: 'A', start_beat: 0, end_beat: 4 }],
-      chords: [{ beat: 0, duration_beats: 4, chord: 'Csus4' }], // not a recognized shape
+      chords: [{ beat: 0, duration_beats: 4, chord: 'Cadd9' }], // not a recognized shape
       melody: [],
     };
     await expect(playSong(chartData)).resolves.not.toThrow();

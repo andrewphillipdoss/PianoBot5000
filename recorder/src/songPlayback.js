@@ -60,7 +60,7 @@ export async function playSong(chartData, { onDone, metronome = false } = {}) {
     if (!parsed) continue; // an unrecognized symbol (e.g. a hand-edited chart file) -- skip it, don't crash playback
     const when = audioTimeForBeat(chordEntry.beat);
     const durationSeconds = chordEntry.duration_beats * secondsPerBeat;
-    for (const pitch of voiceChordSimple(parsed.rootPitchClass, parsed.quality)) {
+    for (const pitch of voiceChordSimple(parsed.rootPitchClass, parsed.quality, undefined, parsed.bassPitchClass)) {
       // 0.95x: a hair of detach so consecutive chords read as distinct hits, not one smeared-together tone.
       playNoteForDuration(pitch, CHORD_VELOCITY, when, durationSeconds * 0.95);
     }

@@ -1,7 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { isMidiSupported, listInputs, parseMidiMessage, requestMidiAccess } from '../midi.js';
+import {
+  isMidiSupported,
+  listInputs,
+  listOutputs,
+  parseMidiMessage,
+  requestMidiAccess,
+  sendNoteOff as sendMidiNoteOff,
+  sendNoteOn as sendMidiNoteOn,
+} from '../midi.js';
 
 const SELECTED_INPUT_STORAGE_KEY = 'pianobot-recorder:selectedMidiInputId';
+const SELECTED_OUTPUT_STORAGE_KEY = 'pianobot-recorder:selectedMidiOutputId';
 const MAX_EVENT_LOG = 50;
 
 const MidiContext = createContext(null);
@@ -14,16 +23,36 @@ function readPersistedInputId() {
   }
 }
 
+function readPersistedOutputId() {
+  try {
+    return localStorage.getItem(SELECTED_OUTPUT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * One shared MIDI connection for the whole app -- port access, the
- * selected input, and the raw message stream -- instead of every
- * screen creating its own (which is what this app used to do: each
- * screen picked independently, so the chosen device didn't survive
- * navigating between screens, and the actual recording screens had no
- * way to change it away from whatever got auto-picked at all).
+ * selected input/output, and the raw message stream -- instead of
+ * every screen creating its own (which is what this app used to do:
+ * each screen picked independently, so the chosen device didn't
+ * survive navigating between screens, and the actual recording
+ * screens had no way to change it away from whatever got auto-picked
+ * at all). Because this wraps the whole app (see App.jsx), input,
+ * output, and `subscribe` are reachable via `useMidi()` from any
+ * screen, not just the ones that happen to record or play something
+ * -- e.g. a future "practice along" mode on SongView needs exactly the
+ * same live input stream RecordChords/RecordMelody already get.
  *
- * `selectedInputId` is persisted to localStorage so it survives a
- * reload too, not just navigation within one session.
+ * `selectedInputId`/`selectedOutputId` are persisted to localStorage
+ * so they survive a reload too, not just navigation within one
+ * session. Unlike input (which this app always needs *something*
+ * selected for recording to work at all, so it auto-falls-back to the
+ * first available port), output starts and stays unselected until the
+ * player deliberately picks one -- silently sending notes to whatever
+ * external device/DAW happened to enumerate first would be a much
+ * more surprising default than silently listening to the wrong
+ * keyboard.
  *
  * Multiple things need the live message stream at once -- the
  * diagnostic display (held notes / event log) always does, and
@@ -38,6 +67,8 @@ export function MidiProvider({ children }) {
   const [error, setError] = useState(null);
   const [inputs, setInputs] = useState([]);
   const [selectedInputId, setSelectedInputIdState] = useState(readPersistedInputId);
+  const [outputs, setOutputs] = useState([]);
+  const [selectedOutputId, setSelectedOutputIdState] = useState(readPersistedOutputId);
   const [events, setEvents] = useState([]);
   const [heldNotes, setHeldNotes] = useState(() => new Set());
 
@@ -54,6 +85,16 @@ export function MidiProvider({ children }) {
     }
   }, []);
 
+  const setSelectedOutputId = useCallback((id) => {
+    setSelectedOutputIdState(id);
+    try {
+      if (id) localStorage.setItem(SELECTED_OUTPUT_STORAGE_KEY, id);
+      else localStorage.removeItem(SELECTED_OUTPUT_STORAGE_KEY);
+    } catch {
+      // Best-effort, same as input.
+    }
+  }, []);
+
   useEffect(() => {
     if (!supported) return;
     let cancelled = false;
@@ -63,9 +104,12 @@ export function MidiProvider({ children }) {
       .then((access) => {
         if (cancelled) return;
         midiAccessRef.current = access;
-        const refreshInputs = () => setInputs(listInputs(access));
-        refreshInputs();
-        access.onstatechange = refreshInputs;
+        const refresh = () => {
+          setInputs(listInputs(access));
+          setOutputs(listOutputs(access));
+        };
+        refresh();
+        access.onstatechange = refresh;
         setStatus('granted');
       })
       .catch((err) => {
@@ -91,6 +135,15 @@ export function MidiProvider({ children }) {
       setSelectedInputId(inputs[0].id);
     }
   }, [inputs, selectedInputId, setSelectedInputId]);
+
+  // Same idea, minus the auto-fallback (see the docstring above) --
+  // only clear the selection if the previously-picked output is
+  // genuinely gone; never substitute a different one on our own.
+  useEffect(() => {
+    if (selectedOutputId && !outputs.some((o) => o.id === selectedOutputId)) {
+      setSelectedOutputIdState(null);
+    }
+  }, [outputs, selectedOutputId]);
 
   const handleMessage = useCallback((event) => {
     const parsed = parseMidiMessage(event);
@@ -130,9 +183,43 @@ export function MidiProvider({ children }) {
     return () => subscribersRef.current.delete(callback);
   }, []);
 
+  // No-ops (not errors) when nothing is selected/connected -- a caller
+  // that wants to route audio to a real MIDI device shouldn't need its
+  // own "is one actually selected" guard before every note.
+  const sendNoteOn = useCallback(
+    (note, velocity) => {
+      const output = selectedOutputId ? midiAccessRef.current?.outputs.get(selectedOutputId) : null;
+      sendMidiNoteOn(output, note, velocity);
+    },
+    [selectedOutputId]
+  );
+
+  const sendNoteOff = useCallback(
+    (note) => {
+      const output = selectedOutputId ? midiAccessRef.current?.outputs.get(selectedOutputId) : null;
+      sendMidiNoteOff(output, note);
+    },
+    [selectedOutputId]
+  );
+
   const value = useMemo(
-    () => ({ supported, status, error, inputs, selectedInputId, setSelectedInputId, events, heldNotes, subscribe }),
-    [supported, status, error, inputs, selectedInputId, setSelectedInputId, events, heldNotes, subscribe]
+    () => ({
+      supported,
+      status,
+      error,
+      inputs,
+      selectedInputId,
+      setSelectedInputId,
+      outputs,
+      selectedOutputId,
+      setSelectedOutputId,
+      sendNoteOn,
+      sendNoteOff,
+      events,
+      heldNotes,
+      subscribe,
+    }),
+    [supported, status, error, inputs, selectedInputId, setSelectedInputId, outputs, selectedOutputId, setSelectedOutputId, sendNoteOn, sendNoteOff, events, heldNotes, subscribe]
   );
 
   return <MidiContext.Provider value={value}>{children}</MidiContext.Provider>;

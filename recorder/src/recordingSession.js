@@ -183,7 +183,7 @@ export class RecordingSession {
     for (const chord of this.chordsToPlay) {
       const when = this._audioTimeForBeat(this.beatsPerBar + this.pickupBeats + chord.start);
       const durationSeconds = (chord.end - chord.start) * this.secondsPerBeat;
-      const pitches = voiceChordSimple(chord.rootPitchClass, chord.quality);
+      const pitches = voiceChordSimple(chord.rootPitchClass, chord.quality, undefined, chord.bassPitchClass);
       for (const pitch of pitches) {
         // 0.95x: a hair of detach so consecutive chords read as distinct hits, not one smeared-together tone.
         playNoteForDuration(pitch, 70, when, durationSeconds * 0.95);

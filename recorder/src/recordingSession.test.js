@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { playClickAt, playNoteForDuration } from './pianoSynth.js';
+import { playBassForDuration, playClickAt, playNoteForDuration } from './pianoSynth.js';
 import { RecordingSession } from './recordingSession.js';
 
 // Only the audio side is mocked (real Web Audio doesn't exist in this
@@ -13,6 +13,7 @@ import { RecordingSession } from './recordingSession.js';
 vi.mock('./pianoSynth.js', () => ({
   getAudioContext: () => ({ currentTime: 0 }),
   playClickAt: vi.fn(),
+  playBassForDuration: vi.fn(),
   playNoteForDuration: vi.fn(),
   stopAllNotes: vi.fn(),
 }));
@@ -329,6 +330,16 @@ describe('RecordingSession (fixed-length melody take)', () => {
 
     const secondsPerBeat = 60 / FAST_TEMPO;
     expect(playNoteForDuration).toHaveBeenCalledWith(72, 88, expect.closeTo(0.05 + (4 + 4 + 1.5) * secondsPerBeat, 10), expect.any(Number));
+  });
+
+  it('a backing bassline plays on the bass guitar voice', async () => {
+    playNoteForDuration.mockClear();
+    playBassForDuration.mockClear();
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'melody' });
+    session.start({ sectionLengthBeats: 20, backing: { bassline: [{ pitch: 36, velocity: 100, start: 0, end: 2 }] } });
+    session.cancel();
+    expect(playBassForDuration).toHaveBeenCalledTimes(1);
+    expect(playNoteForDuration).not.toHaveBeenCalled();
   });
 
   it('restart() discards the in-progress take and begins a fresh count-in', async () => {

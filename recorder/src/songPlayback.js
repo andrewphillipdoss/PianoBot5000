@@ -11,7 +11,7 @@
  */
 
 import { BEATS_PER_BAR } from './recordingPipeline.js';
-import { enableAudio, getAudioContext, playClickAt, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
+import { enableAudio, getAudioContext, playBassForDuration, playClickAt, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
 import { parseChordSymbol, voiceChordSimple } from './theory.js';
 
 const CHORD_VELOCITY = 70;
@@ -79,7 +79,7 @@ export async function playSong(chartData, { onDone, metronome = false } = {}) {
   for (const note of chartData.bassline ?? []) {
     const when = audioTimeForBeat(note.beat);
     const durationSeconds = note.duration_beats * secondsPerBeat;
-    playNoteForDuration(note.pitch, note.velocity, when, durationSeconds * 0.95);
+    playBassForDuration(note.pitch, note.velocity, when, durationSeconds * 0.95); // its own bass guitar voice, not the keys
   }
 
   const totalSeconds = (endBeat - startBeat) * secondsPerBeat;

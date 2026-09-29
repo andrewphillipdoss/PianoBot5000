@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { playClickAt, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
+import { playBassForDuration, playClickAt, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
 import { playSong } from './songPlayback.js';
 
 vi.mock('./pianoSynth.js', () => ({
   enableAudio: vi.fn(() => Promise.resolve()),
   getAudioContext: () => ({ currentTime: 0 }),
   playClickAt: vi.fn(() => ({ stop: vi.fn() })),
+  playBassForDuration: vi.fn(),
   playNoteForDuration: vi.fn(),
   stopAllNotes: vi.fn(),
 }));
@@ -41,6 +42,25 @@ describe('playSong', () => {
     expect(melodyCall).toBeDefined();
     expect(melodyCall[1]).toBe(90); // velocity carried through as-is
     expect(melodyCall[2]).toBeCloseTo(ANCHOR + 2 * SPB, 10);
+  });
+
+  it('plays the bassline on its own bass guitar voice, not the keys', async () => {
+    playNoteForDuration.mockClear();
+    playBassForDuration.mockClear();
+    const chartData = {
+      tempo: TEMPO,
+      sections: [{ label: 'A', start_beat: 0, end_beat: 8 }],
+      chords: [],
+      melody: [],
+      bassline: [{ beat: 1, duration_beats: 2, pitch: 36, velocity: 100 }],
+    };
+    await playSong(chartData);
+
+    expect(playNoteForDuration).not.toHaveBeenCalled();
+    expect(playBassForDuration).toHaveBeenCalledTimes(1);
+    const [pitch, velocity, when] = playBassForDuration.mock.calls[0];
+    expect([pitch, velocity]).toEqual([36, 100]);
+    expect(when).toBeCloseTo(ANCHOR + 1 * SPB, 10);
   });
 
   it('starts from a pickup note (negative beat) rather than clipping it', async () => {

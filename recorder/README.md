@@ -123,6 +123,16 @@ holding into the next bar. While recording, the live bar counter on the
 record screen counts the same way, starting from the bar the first note
 lands in.
 
+**A chord lasts until the next one, the way a chord chart reads**
+(`holdChordsUntilNextChange` in theory.js) -- when a chord *starts* is
+the musical fact; when the hand happened to come off the keys isn't. So
+only a chord's start is quantized (the "Chord changes snap to" picker),
+and its end becomes the next chord's start -- short stabs on each
+downbeat read as one chord per bar, not a bar of mostly silence. It
+never stretches past the end of the bar it was let go in (a release a
+moment past a barline counts as at it), so whole empty bars before the
+next chord stay a genuine rest, and never past the section's end.
+
 **Chord clustering ("were these notes struck together?") is independent
 of the quantization grid** -- it runs on raw, unquantized timing with its
 own fixed hand-roll tolerance; the chosen display grid only rounds a
@@ -280,6 +290,22 @@ All of this is still built from the same click-free, fully analytic
 gain envelope architecture the piano voice already had -- see
 pianoSynth.js's own docstring for why that constraint exists and how it
 stays satisfied.
+
+**The bassline plays on its own fingered-bass-guitar voice**
+(`playBassForDuration` in pianoSynth.js) -- in song playback and in the
+backing track under another part's take. A plucked string rather than a
+keyboard: a pure sine at the fundamental for weight, plus a sawtooth
+(every harmonic) through a lowpass filter that opens bright for the
+first quarter second of each note -- the pluck, brighter the harder the
+note was played -- then settles into a round, dark body that keeps
+slowly fading while held (a string never sustains flat), and a quick
+fingertip mute on release. The harmonics matter more than they sound
+like they should: a low E is 41Hz, below what most laptop and phone
+speakers can play at all, so without them the bass would simply vanish
+there. Same fully analytic, click-free scheduling as the keys. Every
+voice now runs through one shared safety limiter
+(`DynamicsCompressorNode`) before the speakers, since chords, melody and
+bass together can add up past full scale.
 
 **MIDI input has been reachable from any screen since `MidiProvider`
 started wrapping the whole app; output now is too** (`midi.js`'s

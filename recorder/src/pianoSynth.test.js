@@ -84,6 +84,24 @@ describe('playNoteForDuration', () => {
       return osc;
     }
 
+    const filters = [];
+    function makeParam() {
+      const events = [];
+      return {
+        events,
+        get value() {
+          throw new Error('scheduled voices must never read AudioParam.value');
+        },
+        set value(_v) {},
+        setValueAtTime(value, time) {
+          events.push({ method: 'setValueAtTime', value, time });
+        },
+        exponentialRampToValueAtTime(value, time) {
+          events.push({ method: 'exponentialRampToValueAtTime', value, time });
+        },
+      };
+    }
+
     class FakeAudioContext {
       constructor() {
         this.currentTime = 0;
@@ -95,13 +113,22 @@ describe('playNoteForDuration', () => {
       createOscillator() {
         return makeOscillator();
       }
+      createDynamicsCompressor() {
+        const plain = () => ({ value: 0 });
+        return { threshold: plain(), knee: plain(), ratio: plain(), attack: plain(), release: plain(), connect: () => {} };
+      }
+      createBiquadFilter() {
+        const filter = { type: null, Q: makeParam(), frequency: makeParam(), connect: () => {} };
+        filters.push(filter);
+        return filter;
+      }
       resume() {
         return Promise.resolve();
       }
     }
 
     globalThis.window = { AudioContext: FakeAudioContext };
-    return { createdGainNodes, oscillators };
+    return { createdGainNodes, oscillators, filters };
   }
 
   beforeEach(() => {
@@ -171,5 +198,48 @@ describe('playNoteForDuration', () => {
     expect(tine.events.map((e) => e.method)).toEqual(['setValueAtTime', 'exponentialRampToValueAtTime']);
     const [peak, decayed] = tine.events;
     expect(decayed.time - peak.time).toBeLessThan(0.2);
+  });
+
+  it('bass guitar voice: a pluck that opens the filter and closes it again, then fades while held -- all analytic', async () => {
+    const { createdGainNodes, oscillators, filters } = installFakeAudioContext();
+    const { enableAudio, playBassForDuration } = await import('./pianoSynth.js');
+    await enableAudio();
+
+    expect(() => playBassForDuration(36, 100, 1.0, 1.5)).not.toThrow(); // C2, held well past the pluck
+
+    const master = createdGainNodes[0];
+    expect(master.events.map((e) => e.method)).toEqual([
+      'setValueAtTime',
+      'linearRampToValueAtTime', // attack
+      'exponentialRampToValueAtTime', // the pluck settling into the body
+      'exponentialRampToValueAtTime', // the slow fade while held
+      'linearRampToValueAtTime', // the fingertip mute, down to true silence
+    ]);
+    expect(master.events.at(-1).value).toBe(0);
+    for (let i = 1; i < master.events.length; i++) {
+      expect(master.events[i].time).toBeGreaterThanOrEqual(master.events[i - 1].time);
+    }
+    expect(master.events[3].value).toBeLessThan(master.events[2].value); // still fading, never a flat sustain
+
+    const [filter] = filters;
+    expect(filter.type).toBe('lowpass');
+    const [open, settled] = filter.frequency.events;
+    expect(settled.value).toBeLessThan(open.value); // bright, then darker
+    expect(settled.time - open.time).toBeLessThan(0.5);
+
+    expect(oscillators.map((o) => o.type).sort()).toEqual(['sawtooth', 'sine']);
+    for (const osc of oscillators) {
+      expect(osc.start).toHaveBeenCalledWith(1.0);
+      expect(osc.stop.mock.calls[0][0]).toBeGreaterThan(master.events.at(-1).time);
+    }
+  });
+
+  it('bass guitar voice: a harder pluck is brighter', async () => {
+    const { filters } = installFakeAudioContext();
+    const { enableAudio, playBassForDuration } = await import('./pianoSynth.js');
+    await enableAudio();
+    playBassForDuration(36, 40, 0, 1);
+    playBassForDuration(36, 120, 0, 1);
+    expect(filters[1].frequency.events[0].value).toBeGreaterThan(filters[0].frequency.events[0].value);
   });
 });

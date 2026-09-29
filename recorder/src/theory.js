@@ -442,6 +442,36 @@ export function mergeConsecutiveChords(chords) {
   return merged;
 }
 
+// A chord let go within this many beats past a barline was let go *at*
+// the barline -- a hand lifting a moment late, not a choice to hold on.
+const CHORD_RELEASE_TOLERANCE_BEATS = 0.5;
+
+/**
+ * Chart-style chord durations: on a chord chart, a chord lasts until
+ * the next one -- *when it starts* is the musical fact; when the hand
+ * happened to come off the keys isn't. So each chord's end becomes the
+ * next chord's start, never later than the end of the bar it was let go
+ * in (a gap of whole empty bars before the next chord stays empty --
+ * that's a genuine rest, "N.C.", not a chord to stretch across), and
+ * never past `sectionEndBeats`. A chord released a hair past a barline
+ * counts as released at it.
+ *
+ * `chords` must be in start order, with `end` still the real release.
+ * A chord left lasting no time at all (another started on the very same
+ * beat) is dropped -- the later one is what's on the chart there.
+ */
+export function holdChordsUntilNextChange(chords, beatsPerBar = 4, sectionEndBeats = Infinity) {
+  return chords
+    .map((chord, i) => {
+      const next = chords[i + 1];
+      const barOfStartEnd = (Math.floor(chord.start / beatsPerBar) + 1) * beatsPerBar;
+      const barOfReleaseEnd = Math.ceil((chord.end - CHORD_RELEASE_TOLERANCE_BEATS) / beatsPerBar - 1e-9) * beatsPerBar;
+      const end = Math.min(next ? next.start : Infinity, Math.max(barOfStartEnd, barOfReleaseEnd), sectionEndBeats);
+      return { ...chord, end };
+    })
+    .filter((chord) => chord.end > chord.start);
+}
+
 // A note let go within this many beats of a barline hasn't really been
 // held *into* the next bar -- it's just a legato release a hair late.
 const HELD_INTO_BAR_MIN_BEATS = 1;

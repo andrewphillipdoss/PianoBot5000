@@ -174,7 +174,7 @@ export default function RecordPart({
           <>
             <div className="chip-row" style={{ justifyContent: 'center' }}>
               <TempoInput value={tempo} onChange={onTempoChange} />
-              <QuantizationSelect label={`${partName} quantization`} value={subdivisionsPerBeat} onChange={onSubdivisionsPerBeatChange} />
+              <QuantizationSelect label={part === 'chords' ? 'Chord changes snap to' : `${partName} quantization`} value={subdivisionsPerBeat} onChange={onSubdivisionsPerBeatChange} />
               {isLine && <QuantizeStrengthSelect value={quantizeStrength} onChange={onQuantizeStrengthChange} />}
               <MetronomeSubdivisionSelect value={metronomeSubdivisionsPerBeat} onChange={onMetronomeSubdivisionsPerBeatChange} />
             </div>

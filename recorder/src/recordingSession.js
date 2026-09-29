@@ -40,7 +40,7 @@ import {
   DEFAULT_METRONOME_SUBDIVISIONS_PER_BEAT,
   processTake,
 } from './recordingPipeline.js';
-import { getAudioContext, playClickAt, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
+import { getAudioContext, playBassForDuration, playClickAt, playNoteForDuration, stopAllNotes } from './pianoSynth.js';
 import { voiceChordSimple } from './theory.js';
 
 const SCHEDULE_INTERVAL_MS = 25; // how often the lookahead loop wakes up
@@ -214,19 +214,22 @@ export class RecordingSession {
    * before the count-in's first click is simply skipped.
    */
   _scheduleBacking() {
-    const schedule = (pitch, velocity, start, end) => {
+    const schedule = (pitch, velocity, start, end, voice = playNoteForDuration) => {
       const beat = this._downbeatOffset + start;
       if (beat < 0) return;
       // 0.95x: a hair of detach so consecutive hits read as distinct, not one smeared-together tone.
-      playNoteForDuration(pitch, velocity, this._audioTimeForBeat(beat), (end - start) * this.secondsPerBeat * 0.95);
+      voice(pitch, velocity, this._audioTimeForBeat(beat), (end - start) * this.secondsPerBeat * 0.95);
     };
     for (const chord of this.backing.chords ?? []) {
       for (const pitch of voiceChordSimple(chord.rootPitchClass, chord.quality, undefined, chord.bassPitchClass)) {
         schedule(pitch, BACKING_CHORD_VELOCITY, chord.start, chord.end);
       }
     }
-    for (const note of [...(this.backing.melody ?? []), ...(this.backing.bassline ?? [])]) {
+    for (const note of this.backing.melody ?? []) {
       schedule(note.pitch, note.velocity ?? 80, note.start, note.end);
+    }
+    for (const note of this.backing.bassline ?? []) {
+      schedule(note.pitch, note.velocity ?? 80, note.start, note.end, playBassForDuration); // the bass guitar voice
     }
   }
 

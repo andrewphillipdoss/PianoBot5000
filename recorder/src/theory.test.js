@@ -16,6 +16,7 @@ import {
   parseChordSymbol,
   quantizeBeat,
   quantizeNotes,
+  holdChordsUntilNextChange,
   recognizeSectionBars,
   secondsToBeats,
   voiceChordSimple,
@@ -728,6 +729,37 @@ describe('mergeConsecutiveChords', () => {
 
   it('leaves an already chord-change-only progression untouched', () => {
     expect(mergeConsecutiveChords([])).toEqual([]);
+  });
+});
+
+describe('holdChordsUntilNextChange', () => {
+  const chord = (start, end) => ({ start, end });
+
+  it('ends each chord where the next one starts', () => {
+    expect(holdChordsUntilNextChange([chord(0, 1), chord(2, 2.5), chord(4, 4.5)], 4, 8)).toEqual([chord(0, 2), chord(2, 4), chord(4, 8)]);
+  });
+
+  it('holds the last chord to the end of its bar, and no further than the section', () => {
+    expect(holdChordsUntilNextChange([chord(1, 2)], 4)).toEqual([chord(1, 4)]);
+    expect(holdChordsUntilNextChange([chord(1, 20)], 4, 12)).toEqual([chord(1, 12)]);
+  });
+
+  it('does not stretch over whole empty bars -- a rest stays a rest', () => {
+    expect(holdChordsUntilNextChange([chord(0, 3), chord(12, 13)], 4, 16)).toEqual([chord(0, 4), chord(12, 16)]);
+  });
+
+  it('counts a release a moment past the barline as a release at it', () => {
+    expect(holdChordsUntilNextChange([chord(0, 4.3), chord(12, 13)], 4, 16)).toEqual([chord(0, 4), chord(12, 16)]);
+    expect(holdChordsUntilNextChange([chord(0, 6), chord(12, 13)], 4, 16)).toEqual([chord(0, 8), chord(12, 16)]);
+  });
+
+  it('drops a chord another one starts on top of', () => {
+    const later = { ...chord(2, 3), name: 'later' };
+    expect(holdChordsUntilNextChange([chord(2, 3), later], 4)).toEqual([{ ...later, end: 4 }]);
+  });
+
+  it('follows the time signature', () => {
+    expect(holdChordsUntilNextChange([chord(0, 1)], 3)).toEqual([chord(0, 3)]);
   });
 });
 

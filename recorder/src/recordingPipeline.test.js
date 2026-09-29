@@ -39,7 +39,7 @@ describe('processChordsPass', () => {
     ];
     // Against an existing length, so the empty first bar stays put and only the roll is under test.
     const { chords } = processChordsPass(messages, TEMPO, { sectionLengthBeats: 8 });
-    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 4, end: 5 }]);
+    expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 4, end: 8 }]); // held on to the end of its bar -- see the chart-duration tests below
   });
 
   it('trims trailing dead air, using the true capture duration -- not the last note-off', () => {
@@ -61,8 +61,8 @@ describe('processChordsPass', () => {
     const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 60 * SPB });
 
     expect(chords).toEqual([
-      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 },
-      { rootPitchClass: 5, quality: 'maj', bassPitchClass: 5, start: 20, end: 21 },
+      { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 }, // let go at the barline, then whole empty bars -- a rest, not stretched over
+      { rootPitchClass: 5, quality: 'maj', bassPitchClass: 5, start: 20, end: 24 }, // to the end of its bar
     ]);
     // Last onset (beat 20) is in bar 6 -> 6 bars (24 beats), the rest in the middle included.
     // Trimming the dead air after it is exactly the point: it'd otherwise be 15 bars.
@@ -128,7 +128,7 @@ describe('processChordsPass', () => {
     const { chords } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 4 * SPB, subdivisionsPerBeat: 2 }); // 2 subdivisions/beat = 8th notes
     expect(chords).toEqual([
       { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 0.5 },
-      { rootPitchClass: 5, quality: 'maj', bassPitchClass: 5, start: 0.5, end: 1 },
+      { rootPitchClass: 5, quality: 'maj', bassPitchClass: 5, start: 0.5, end: 4 }, // held on to the end of the bar
     ]);
   });
 
@@ -425,6 +425,43 @@ describe('section length, recognized from the take that sets it', () => {
     const { notes, sectionLengthBeats } = processLinePass('melody', messages, TEMPO, { captureDurationSeconds: 21 * SPB, quantizeStrength: 1 });
     expect(notes.map((n) => n.start)).toEqual([0, 4]);
     expect(sectionLengthBeats).toBe(16); // struck in 2 bars, sounding for 4 -> the 4-bar phrase
+  });
+});
+
+describe('chord durations, chart style: a chord lasts until the next one', () => {
+  const chordAt = (beat, pitches, releaseBeat) => [
+    ...pitches.map((note) => ({ timestamp: beat * SPB, type: 'noteon', note, velocity: 90 })),
+    ...pitches.map((note) => ({ timestamp: releaseBeat * SPB, type: 'noteoff', note, velocity: 0 })),
+  ];
+  const byTime = (a, b) => a.timestamp - b.timestamp;
+
+  it('fills a chord out to the next change, however early the hand came off -- only the start matters', () => {
+    // Short, choppy stabs on each downbeat.
+    const messages = [...chordAt(0, [48, 52, 55], 0.6), ...chordAt(4.1, [53, 57, 60], 5), ...chordAt(7.95, [55, 59, 62], 8.4)].sort(byTime);
+    const { chords } = processChordsPass(messages, TEMPO, { sectionLengthBeats: 12 });
+    expect(chords.map((c) => [c.rootPitchClass, c.start, c.end])).toEqual([
+      [0, 0, 4],
+      [5, 4, 8],
+      [7, 8, 12],
+    ]);
+  });
+
+  it('keeps two changes in one bar exactly where they start', () => {
+    const messages = [...chordAt(0, [48, 52, 55], 1), ...chordAt(2, [55, 59, 62], 2.5)].sort(byTime);
+    const { chords } = processChordsPass(messages, TEMPO, { sectionLengthBeats: 4 });
+    expect(chords.map((c) => [c.rootPitchClass, c.start, c.end])).toEqual([
+      [0, 0, 2],
+      [7, 2, 4],
+    ]);
+  });
+
+  it('holds a chord across bars when it was actually held there', () => {
+    const messages = [...chordAt(0, [48, 52, 55], 7.9), ...chordAt(12, [53, 57, 60], 15)].sort(byTime);
+    const { chords } = processChordsPass(messages, TEMPO, { sectionLengthBeats: 16 });
+    expect(chords.map((c) => [c.rootPitchClass, c.start, c.end])).toEqual([
+      [0, 0, 8], // held through bar 2 -- then bar 3 is a genuine rest
+      [5, 12, 16],
+    ]);
   });
 });
 

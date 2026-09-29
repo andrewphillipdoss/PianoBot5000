@@ -13,6 +13,7 @@ import {
   dropAccidentalTouches,
   extractBassLine,
   extractTopLine,
+  holdChordsUntilNextChange,
   mergeConsecutiveChords,
   messagesToNotes,
   quantizeBeat,
@@ -150,22 +151,21 @@ export function processChordsPass(
   // dropped.
   const skippedClusterCount = clusterOnsets(rawNotes, CHORD_CLUSTER_THRESHOLD_BEATS).length - detectedChords.length;
   // Only *now*, after clustering has already decided which notes are
-  // one chord, does the display grid come in -- purely rounding each
-  // chord's boundaries to it, with the same "never round away to
-  // nothing" guard quantizeNotes uses.
-  const step = 1 / subdivisionsPerBeat;
-  const chords = mergeConsecutiveChords(detectedChords).map((c) => {
-    const start = quantizeBeat(c.start, subdivisionsPerBeat);
-    let end = quantizeBeat(c.end, subdivisionsPerBeat);
-    if (end <= start) end = start + step;
-    return { ...c, start, end };
-  });
+  // one chord, does the display grid come in -- and only for where each
+  // chord *starts*. Where it stops is decided below, from the chords
+  // around it rather than from when the hand came off the keys; the
+  // real release is kept until then because length recognition (a
+  // final chord held on) still wants to know it.
+  const struck = mergeConsecutiveChords(detectedChords).map((c) => ({ ...c, start: quantizeBeat(c.start, subdivisionsPerBeat) }));
 
-  if (setsLength) {
-    const recognized = withRecognizedLength(chords, durationSeconds, tempo, beatsPerBar);
-    return { chords: recognized.events, sectionLengthBeats: recognized.sectionLengthBeats, skippedClusterCount };
-  }
-  return { chords: clipToSectionLength(chords, sectionLengthBeats), sectionLengthBeats, skippedClusterCount };
+  const { events, sectionLengthBeats: length } = setsLength
+    ? withRecognizedLength(struck, durationSeconds, tempo, beatsPerBar)
+    : { events: struck.filter((c) => c.start < sectionLengthBeats), sectionLengthBeats };
+  // Holding every chord on to the next change can bring two
+  // neighbours with the same name together (a different chord between
+  // them that shared their start after quantizing) -- merge them again.
+  const chords = mergeConsecutiveChords(holdChordsUntilNextChange(events, beatsPerBar, length));
+  return { chords, sectionLengthBeats: length, skippedClusterCount };
 }
 
 /**

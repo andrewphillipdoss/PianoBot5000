@@ -134,7 +134,7 @@ export default function SectionHub({
             {take?.rawMessages && (
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                 <QuantizationSelect
-                  label="Quantization"
+                  label={part === 'chords' ? 'Chord changes snap to' : 'Quantization'}
                   value={settings[`${part}Quantization`]}
                   onChange={(value) => onSettingChange(part, { [`${part}Quantization`]: value })}
                 />

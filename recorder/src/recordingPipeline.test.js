@@ -5,7 +5,7 @@ const TEMPO = 120; // 0.5 seconds per beat -- easy round numbers for test timest
 const SPB = 60 / TEMPO;
 
 describe('processChordsPass', () => {
-  it('detects chords and rounds a clean take (no dead air) up to the nearest 4-bar unit', () => {
+  it('detects chords, and recognizes the section as the 2 bars the chord was held for', () => {
     const messages = [
       { timestamp: 0, type: 'noteon', note: 48, velocity: 90 }, // C3
       { timestamp: 0, type: 'noteon', note: 52, velocity: 90 }, // E3
@@ -18,7 +18,7 @@ describe('processChordsPass', () => {
     const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 8 * SPB });
 
     expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 8 }]);
-    expect(sectionLengthBeats).toBe(16); // 8 real beats rounds up to one 4-bar (16-beat) unit
+    expect(sectionLengthBeats).toBe(8); // struck in bar 1, held through bar 2 -- 2 bars, not rounded up to 4
   });
 
   it('still recognizes a rolled chord whose notes quantize onto adjacent 16th-note grid points', () => {
@@ -37,11 +37,12 @@ describe('processChordsPass', () => {
       { timestamp: 5 * SPB, type: 'noteoff', note: 52, velocity: 0 },
       { timestamp: 5 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
-    const { chords } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 8 * SPB });
+    // Against an existing length, so the empty first bar stays put and only the roll is under test.
+    const { chords } = processChordsPass(messages, TEMPO, { sectionLengthBeats: 8 });
     expect(chords).toEqual([{ rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 4, end: 5 }]);
   });
 
-  it('trims trailing dead air before rounding, using the true capture duration -- not the last note-off', () => {
+  it('trims trailing dead air, using the true capture duration -- not the last note-off', () => {
     const messages = [
       { timestamp: 0, type: 'noteon', note: 48, velocity: 90 }, // C3 -- C major, beat 0
       { timestamp: 0, type: 'noteon', note: 52, velocity: 90 },
@@ -63,9 +64,9 @@ describe('processChordsPass', () => {
       { rootPitchClass: 0, quality: 'maj', bassPitchClass: 0, start: 0, end: 4 },
       { rootPitchClass: 5, quality: 'maj', bassPitchClass: 5, start: 20, end: 21 },
     ]);
-    // Last onset (beat 20) is in bar index 5 -> keeps bars 0-5 (24 beats) -> rounds to the nearest 16 -> 32.
-    // Trimming this dead air is exactly the point: without it, 60 beats would round to 64.
-    expect(sectionLengthBeats).toBe(32);
+    // Last onset (beat 20) is in bar 6 -> 6 bars (24 beats), the rest in the middle included.
+    // Trimming the dead air after it is exactly the point: it'd otherwise be 15 bars.
+    expect(sectionLengthBeats).toBe(24);
   });
 
   it('merges a chord re-struck on consecutive bars into one entry instead of counting it as a change', () => {
@@ -99,7 +100,7 @@ describe('processChordsPass', () => {
       { timestamp: 5 * SPB, type: 'noteoff', note: 52, velocity: 0 },
       { timestamp: 5 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
-    const { chords } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 8 * SPB, subdivisionsPerBeat: 2 }); // 2 subdivisions/beat = 8th notes
+    const { chords } = processChordsPass(messages, TEMPO, { sectionLengthBeats: 8, subdivisionsPerBeat: 2 }); // 2 subdivisions/beat = 8th notes
     expect(chords[0].start).toBe(4.5); // snaps to the nearest half-beat, not the nearest 16th
   });
 
@@ -131,7 +132,7 @@ describe('processChordsPass', () => {
     ]);
   });
 
-  it('rounds section length using a non-default time signature\'s own bar length (3/4)', () => {
+  it('counts bars in a non-default time signature\'s own bar length (3/4)', () => {
     const messages = [
       { timestamp: 0, type: 'noteon', note: 48, velocity: 90 },
       { timestamp: 0, type: 'noteon', note: 52, velocity: 90 },
@@ -140,13 +141,13 @@ describe('processChordsPass', () => {
       { timestamp: 6 * SPB, type: 'noteoff', note: 52, velocity: 0 },
       { timestamp: 6 * SPB, type: 'noteoff', note: 55, velocity: 0 },
     ];
-    // 6 beats captured, no dead air. At 4/4 (default) that rounds up to
-    // one 16-beat (4-bar) unit; at 3/4 a "bar" is 3 beats, so a 4-bar
-    // unit is 12 beats -- 6 beats should round up to that instead.
+    // One chord held 6 beats, no dead air. At 4/4 (default) that's
+    // struck in bar 1 and held into bar 2 -> 2 bars (8 beats); at 3/4 a
+    // bar is 3 beats, so it's exactly 2 bars -> 6 beats.
     const default4_4 = processChordsPass(messages, TEMPO, { captureDurationSeconds: 6 * SPB });
     const time3_4 = processChordsPass(messages, TEMPO, { captureDurationSeconds: 6 * SPB, subdivisionsPerBeat: 2, beatsPerBar: 3 });
-    expect(default4_4.sectionLengthBeats).toBe(16);
-    expect(time3_4.sectionLengthBeats).toBe(12);
+    expect(default4_4.sectionLengthBeats).toBe(8);
+    expect(time3_4.sectionLengthBeats).toBe(6);
   });
 
   it('ignores an accidentally brushed extra key instead of failing to recognize the chord', () => {
@@ -339,7 +340,7 @@ describe('processLinePass (melody, recorded against an existing section length)'
 });
 
 describe('processLinePass (a take that sets the section length)', () => {
-  it('lets melody be recorded first -- no pickup, length from trimmed onsets rounded to 4 bars', () => {
+  it('lets melody be recorded first -- no pickup, length recognized from what was played', () => {
     const messages = [
       { timestamp: 0, type: 'noteon', note: 72, velocity: 90 }, // right on the downbeat -- no pickup bar to land in
       { timestamp: 1 * SPB, type: 'noteoff', note: 72, velocity: 0 },
@@ -349,7 +350,7 @@ describe('processLinePass (a take that sets the section length)', () => {
     ];
     const { notes, sectionLengthBeats } = processLinePass('melody', messages, TEMPO, { captureDurationSeconds: 40 * SPB, quantizeStrength: 1 });
     expect(notes.map((n) => n.start)).toEqual([0, 20]);
-    expect(sectionLengthBeats).toBe(32); // bars 0-5 kept (24 beats), rounded to the nearest 16
+    expect(sectionLengthBeats).toBe(24); // bars 1-6 -- the dead air after them dropped
   });
 
   it('pulls the top line out of melody played over chords', () => {
@@ -382,6 +383,48 @@ describe('processLinePass (a take that sets the section length)', () => {
     ];
     const { notes } = processLinePass('bassline', messages, TEMPO, { captureDurationSeconds: 4 * SPB, quantizeStrength: 1 });
     expect(notes.map((n) => n.pitch)).toEqual([36, 43]);
+  });
+});
+
+describe('section length, recognized from the take that sets it', () => {
+  const chordAt = (beat, pitches, releaseBeat) => [
+    ...pitches.map((note) => ({ timestamp: beat * SPB, type: 'noteon', note, velocity: 90 })),
+    ...pitches.map((note) => ({ timestamp: releaseBeat * SPB, type: 'noteoff', note, velocity: 0 })),
+  ];
+  const C = [48, 52, 55];
+  const F = [53, 57, 60];
+  const G = [55, 59, 62];
+
+  it('keeps a 5-bar phrase at 5 bars -- never rounds down and loses the last bar', () => {
+    const messages = [0, 4, 8, 12, 16].flatMap((beat, i) => chordAt(beat, [C, F, G, F, C][i], beat + 3.9)).sort((a, b) => a.timestamp - b.timestamp);
+    const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 21 * SPB });
+    expect(sectionLengthBeats).toBe(20);
+    expect(chords.at(-1).start).toBe(16);
+  });
+
+  it('reads an 8-bar tune as 8 when its last chord is held through bar 8', () => {
+    const messages = [0, 4, 8, 12, 16, 20, 24].flatMap((beat, i) => chordAt(beat, [C, F, G, C, F, G, C][i], i === 6 ? 32 : beat + 3.9)).sort((a, b) => a.timestamp - b.timestamp);
+    const { sectionLengthBeats } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 33 * SPB });
+    expect(sectionLengthBeats).toBe(32);
+  });
+
+  it('drops a bar of waiting after the count-in, moving the take to the downbeat', () => {
+    const messages = [...chordAt(4, C, 7.9), ...chordAt(8, G, 11.9)].sort((a, b) => a.timestamp - b.timestamp);
+    const { chords, sectionLengthBeats } = processChordsPass(messages, TEMPO, { captureDurationSeconds: 13 * SPB });
+    expect(chords.map((c) => [c.rootPitchClass, c.start])).toEqual([[0, 0], [7, 4]]);
+    expect(sectionLengthBeats).toBe(8);
+  });
+
+  it('works the same way for a melody take', () => {
+    const messages = [
+      { timestamp: 4 * SPB, type: 'noteon', note: 72, velocity: 90 }, // waited a bar first
+      { timestamp: 7 * SPB, type: 'noteoff', note: 72, velocity: 0 },
+      { timestamp: 8 * SPB, type: 'noteon', note: 74, velocity: 90 },
+      { timestamp: 20 * SPB, type: 'noteoff', note: 74, velocity: 0 }, // held through 3 bars
+    ];
+    const { notes, sectionLengthBeats } = processLinePass('melody', messages, TEMPO, { captureDurationSeconds: 21 * SPB, quantizeStrength: 1 });
+    expect(notes.map((n) => n.start)).toEqual([0, 4]);
+    expect(sectionLengthBeats).toBe(16); // struck in 2 bars, sounding for 4 -> the 4-bar phrase
   });
 });
 

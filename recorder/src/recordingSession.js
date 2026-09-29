@@ -255,6 +255,28 @@ export class RecordingSession {
     this._captureEndTimeoutId = setTimeout(() => this._finishCapture(), (this.pickupBeats + this.sectionLengthBeats) * this.secondsPerBeat * 1000);
   }
 
+  /**
+   * Which bar of the section is playing right now, counting the
+   * section's downbeat as bar 1 (0 or less during a pickup bar) -- or
+   * null when not capturing. Read on a timer by the record screen for
+   * its live bar counter; nothing here depends on it.
+   *
+   * On an open-ended take the section doesn't start until the player
+   * does: bars before the first note are dropped when its length is
+   * recognized (see theory.js's recognizeSectionBars), so they aren't
+   * counted here either -- null until something's been played, then
+   * bar 1 is the bar that first note landed in.
+   */
+  currentBar() {
+    if (this.phase !== 'capturing' || this.captureStartRealTime === null) return null;
+    const barSeconds = this.beatsPerBar * this.secondsPerBeat;
+    const elapsedSeconds = (performance.now() - this.captureStartRealTime) / 1000;
+    if (!this.setsLength) return Math.floor((elapsedSeconds - this.pickupBeats * this.secondsPerBeat) / barSeconds) + 1;
+    const firstNote = this.bufferedMessages.find((m) => m.type === 'noteon');
+    if (!firstNote) return null;
+    return Math.floor(elapsedSeconds / barSeconds) - Math.floor(Math.max(0, firstNote.timestamp) / barSeconds) + 1;
+  }
+
   /** Feed one already-parsed MIDI message in; ignored unless a take is actively capturing. */
   handleMidiMessage(parsedMessage) {
     if (this.phase !== 'capturing' || this.captureStartRealTime === null) return;

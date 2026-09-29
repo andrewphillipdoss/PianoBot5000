@@ -72,7 +72,7 @@ export default function SectionHub({
         <div className="chip">
           <span className="label">Section length</span>
           {bars === null ? (
-            <span className="value" style={{ color: 'var(--ink-soft)', fontSize: 14 }}>set by your first take</span>
+            <span className="value" style={{ color: 'var(--ink-soft)', fontSize: 14 }}>recognized from your first take</span>
           ) : (
             <span className="value" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <button className="btn-ghost" style={{ padding: '2px 10px' }} aria-label="One bar shorter" disabled={bars <= 1} onClick={() => onLengthChange(-beatsPerBar)}>
@@ -90,7 +90,7 @@ export default function SectionHub({
 
       {!hasAnyTake && (
         <div className="panel" style={{ fontSize: 14, color: 'var(--ink-soft)' }}>
-          Start with whichever part you know best -- chords, melody or bassline. Your first take sets how long this section is; everything
+          Start with whichever part you know best -- chords, melody or bassline. How long this section is gets recognized from that first take; everything
           you record after it plays along with what's already there.
         </div>
       )}

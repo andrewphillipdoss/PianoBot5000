@@ -29,8 +29,8 @@ change since:
 3. **Section hub** (`SectionHub.jsx`) -- one card each for **Chords**,
    **Melody** and **Bassline**, recordable in any order and re-recordable
    or clearable at any time. Whichever part is recorded first sets the
-   section's length (trailing dead air trimmed, rounded to the nearest 4
-   bars, then adjustable a bar at a time); every take after that plays
+   section's length, recognized from what was played (see below) and
+   adjustable a bar at a time afterwards; every take after that plays
    along with the parts already there and stops by itself at the end. A
    part left empty is simply not in the song. Each card shows its take
    -- the chord chart as a measure grid (see below), melody and bassline
@@ -106,6 +106,22 @@ lead into yet), and every other take is fixed-length, played against
 the rest (`recordingSession.js` schedules the other parts as a backing
 track, all up front on the Web Audio clock) and clipped to the section.
 `processTake` is the single entry point for every part.
+
+**The section's length is recognized from the first take's music, not
+from when it was stopped** (`recognizeSectionBars` in theory.js). Whole
+empty bars before the first note (waiting a moment after the count-in)
+and after the last one (reaching for the stop key) are dropped; a rest in
+the middle stays. What's left is counted in whole bars: at least every
+bar something was *struck* in, at most every bar something was still
+*sounding* in -- and within that range a 4-bar phrase wins, then a
+2-bar one. So an 8-bar tune whose last chord lands in bar 7 and rings
+through bar 8 reads as 8 bars, a chord held on while reaching for the
+stop key doesn't add one, and a 5- or 6-bar phrase stays 5 or 6 instead
+of being rounded to 4 or 8 (rounding down used to cut off the last bar
+outright). A release a beat or less past a barline doesn't count as
+holding into the next bar. While recording, the live bar counter on the
+record screen counts the same way, starting from the bar the first note
+lands in.
 
 **Chord clustering ("were these notes struck together?") is independent
 of the quantization grid** -- it runs on raw, unquantized timing with its

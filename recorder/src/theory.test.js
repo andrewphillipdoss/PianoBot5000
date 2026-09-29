@@ -16,9 +16,8 @@ import {
   parseChordSymbol,
   quantizeBeat,
   quantizeNotes,
-  roundToBarInterval,
+  recognizeSectionBars,
   secondsToBeats,
-  trimTrailingEmptyBars,
   voiceChordSimple,
 } from './theory.js';
 
@@ -732,35 +731,56 @@ describe('mergeConsecutiveChords', () => {
   });
 });
 
-describe('trimTrailingEmptyBars', () => {
-  it('drops trailing bars with no chord onset', () => {
-    // Onsets only through bar 1 (beats 4-8) of an 8-bar (32-beat) take -- bars 2-7 are dead air.
-    const trimmed = trimTrailingEmptyBars(32, [0, 4], 4);
-    expect(trimmed).toBe(8); // 2 bars kept
+describe('recognizeSectionBars', () => {
+  const chord = (start, end) => ({ start, end });
+
+  it('counts the bars that were actually played', () => {
+    // Chords on every bar of a 6-bar phrase, released on time.
+    const events = [0, 4, 8, 12, 16, 20].map((b) => chord(b, b + 4));
+    expect(recognizeSectionBars(events, 24)).toEqual({ startBar: 0, bars: 6 });
   });
 
-  it('keeps everything when the last bar has an onset', () => {
-    const trimmed = trimTrailingEmptyBars(16, [0, 4, 8, 12], 4);
-    expect(trimmed).toBe(16);
+  it('never rounds down past the last bar something was struck in', () => {
+    const events = [0, 4, 8, 12, 16].map((b) => chord(b, b + 4)); // 5 bars
+    expect(recognizeSectionBars(events, 20)).toEqual({ startBar: 0, bars: 5 });
   });
 
-  it('never trims a gap in the middle, only from the end', () => {
-    // Bar 1 (beats 4-8) is empty, but bar 2 (beats 8-12) has an onset --
-    // nothing should be trimmed, since the empty bar isn't trailing.
-    const trimmed = trimTrailingEmptyBars(12, [0, 8], 4);
-    expect(trimmed).toBe(12);
-  });
-});
-
-describe('roundToBarInterval', () => {
-  it('rounds to the nearest 4-bar (16-beat) interval', () => {
-    expect(roundToBarInterval(15)).toBe(16);
-    expect(roundToBarInterval(17)).toBe(16);
-    expect(roundToBarInterval(25)).toBe(32);
+  it('drops dead air at the end -- including a chord held on while reaching for the stop key', () => {
+    // 8 bars, the last chord held a bar and a half past the end.
+    const events = [0, 4, 8, 12, 16, 20, 24, 28].map((b) => chord(b, b + 4));
+    events[7] = chord(28, 38);
+    expect(recognizeSectionBars(events, 40)).toEqual({ startBar: 0, bars: 8 });
   });
 
-  it('never rounds down to zero', () => {
-    expect(roundToBarInterval(2)).toBe(16);
+  it('keeps a final chord held into the bar that completes a phrase', () => {
+    // Struck through bar 7, the last chord held on through bar 8.
+    const events = [0, 4, 8, 12, 16, 20].map((b) => chord(b, b + 4));
+    events.push(chord(24, 32));
+    expect(recognizeSectionBars(events, 34)).toEqual({ startBar: 0, bars: 8 });
+  });
+
+  it('does not count a release a hair past the barline as holding into the next bar', () => {
+    const events = [chord(0, 4), chord(4, 8), chord(8, 12.3)];
+    expect(recognizeSectionBars(events, 14)).toEqual({ startBar: 0, bars: 3 });
+  });
+
+  it('drops whole empty bars at the start, but keeps a rest in the middle', () => {
+    // Waited a bar after the count-in, played bar 2, rested bar 3, played bar 4.
+    const events = [chord(4, 8), chord(12, 16)];
+    expect(recognizeSectionBars(events, 16)).toEqual({ startBar: 1, bars: 3 });
+  });
+
+  it('keeps a first bar that starts partway through (a rest, then the tune)', () => {
+    expect(recognizeSectionBars([chord(2, 4), chord(4, 16)], 16)).toEqual({ startBar: 0, bars: 4 });
+  });
+
+  it('measures bars in the time signature\'s own length (3/4)', () => {
+    const events = [0, 3, 6, 9, 12, 15].map((b) => chord(b, b + 3));
+    expect(recognizeSectionBars(events, 18, 3)).toEqual({ startBar: 0, bars: 6 });
+  });
+
+  it('gives 4 empty bars for a take with nothing in it', () => {
+    expect(recognizeSectionBars([], 30)).toEqual({ startBar: 0, bars: 4 });
   });
 });
 

@@ -5,8 +5,8 @@
  * is unit-testable without a browser or a real keyboard, same spirit as
  * pianobot5000's own theory.py (this is a JS port of the pieces the
  * recorder specifically needs: chord recognition in reverse, light
- * quantization, and the "first take sets the section's length"
- * bar-trimming rule -- not the arranger's voicing/comping logic, which stays
+ * quantization, and recognizing a section's length from the take
+ * that sets it -- not the arranger's voicing/comping logic, which stays
  * server-side in the existing Python CLI).
  */
 
@@ -442,24 +442,51 @@ export function mergeConsecutiveChords(chords) {
   return merged;
 }
 
+// A note let go within this many beats of a barline hasn't really been
+// held *into* the next bar -- it's just a legato release a hair late.
+const HELD_INTO_BAR_MIN_BEATS = 1;
+
+// Section lengths music tends to come in, most natural first: 4-bar
+// phrases (4, 8, 12, 16...), then 2-bar ones.
+const PHRASE_BAR_UNITS = [4, 2];
+
 /**
- * Walk backward from the end of a raw take, dropping any trailing bar
- * with no chord onset in it -- the fix for "there's dead air before I
- * can get back to the spacebar" (see the project's own design
- * discussion): only *trailing* bars are ever dropped, never one in
- * the middle, since removing time from the middle would desync every
- * later chord from what was actually played next.
+ * Recognize how many bars a section is from the take that sets its
+ * length -- what was actually played, not how long the recording ran.
+ * `events` are notes or chords ({start, end} in beats from the end of
+ * the count-in); `captureBeats` is how long the take ran.
+ *
+ *   - Whole empty bars at the very start (waiting a moment after the
+ *     count-in) and at the very end (dead air while reaching for the
+ *     stop key) aren't part of the section. Empty bars in the middle
+ *     are -- that's a rest, and removing it would pull everything after
+ *     it out of time.
+ *   - The section is at least every bar something was *struck* in, and
+ *     at most every bar something was still *sounding* in (a final
+ *     chord held on). Within that range, a length that falls on a
+ *     4-bar phrase wins, then a 2-bar one -- so an 8-bar tune whose last
+ *     chord is struck in bar 7 and held through bar 8 reads as 8, while
+ *     a 6-bar phrase stays 6, and a 5-bar one stays 5 rather than being
+ *     rounded down and losing its last bar.
+ *
+ * @returns {{startBar: number, bars: number}} the first bar that's part
+ *   of the section (bars before it are dropped) and how many there are.
+ *   An empty take gives 4 bars, from the start.
  */
-export function trimTrailingEmptyBars(totalBeats, chordOnsetsBeats, beatsPerBar = 4) {
-  const totalBars = Math.ceil(totalBeats / beatsPerBar);
-  let lastNonEmptyBar = -1;
-  for (const onset of chordOnsetsBeats) {
-    const bar = Math.floor(onset / beatsPerBar);
-    if (bar > lastNonEmptyBar) lastNonEmptyBar = bar;
+export function recognizeSectionBars(events, captureBeats, beatsPerBar = 4) {
+  if (events.length === 0) return { startBar: 0, bars: 4 };
+  const onsets = events.map((e) => e.start);
+  const startBar = Math.max(0, Math.floor(Math.min(...onsets) / beatsPerBar));
+  const struckBars = Math.floor(Math.max(...onsets) / beatsPerBar) + 1 - startBar;
+  const soundingEnd = Math.min(Math.max(...events.map((e) => e.end)), captureBeats);
+  const soundingBars = Math.max(struckBars, Math.ceil((soundingEnd - HELD_INTO_BAR_MIN_BEATS) / beatsPerBar) - startBar);
+
+  for (const unit of PHRASE_BAR_UNITS) {
+    for (let bars = struckBars; bars <= soundingBars; bars++) {
+      if (bars % unit === 0) return { startBar, bars };
+    }
   }
-  if (lastNonEmptyBar === -1) return 0;
-  const keptBars = Math.min(lastNonEmptyBar + 1, totalBars);
-  return keptBars * beatsPerBar;
+  return { startBar, bars: struckBars };
 }
 
 const DEFAULT_VOICING_BASE_MIDI = 48; // C3
@@ -529,13 +556,6 @@ export function describeChordTones(quality) {
       default: return `${interval}`;
     }
   });
-}
-
-/** Round a beat length to the nearest multiple of `intervalBars` bars (default: 4). */
-export function roundToBarInterval(beats, intervalBars = 4, beatsPerBar = 4) {
-  const step = intervalBars * beatsPerBar;
-  const rounded = Math.round(beats / step) * step;
-  return rounded === 0 ? step : rounded;
 }
 
 // Some keyboards' key contacts "bounce" -- a single physical press can

@@ -249,6 +249,21 @@
   font-weight: 600;
 }
 
+/* The record screen's live bar counter. */
+.bar-counter {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 600;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.bar-counter__of {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+
 /* Chord Chart: a lead-sheet style measure grid (see ChordChart.jsx /
    chordChartLayout.js). Every measure the same width, four to a line
    (two on a narrow screen) -- the grid reflows on its own, since the

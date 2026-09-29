@@ -71,5 +71,7 @@ export function useRecordingSession({ tempo, part, subdivisionsPerBeat, quantize
 
   const handleMidiMessage = useCallback((message) => sessionRef.current?.handleMidiMessage(message), []);
 
-  return { phase, result, error, isPickupBar, start, stop, restart, handleMidiMessage };
+  const currentBar = useCallback(() => sessionRef.current?.currentBar() ?? null, []);
+
+  return { phase, result, error, isPickupBar, start, stop, restart, handleMidiMessage, currentBar };
 }

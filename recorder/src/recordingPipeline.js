@@ -17,9 +17,8 @@ import {
   messagesToNotes,
   quantizeBeat,
   quantizeNotes,
-  roundToBarInterval,
+  recognizeSectionBars,
   secondsToBeats,
-  trimTrailingEmptyBars,
 } from './theory.js';
 
 export const DEFAULT_BEATS_PER_BAR = 4; // a plain quarter-note beat per the time signature's numerator -- 3 for 3/4, 4 for 4/4, etc. (compound meters like 6/8 aren't modeled separately; pick the beat count that reads naturally)
@@ -89,20 +88,25 @@ const CHORD_CLUSTER_THRESHOLD_BEATS = 0.35;
  *
  *   - The *first* take recorded in a section -- whichever part it is --
  *     sets the section's length. It runs open-ended until the player
- *     stops it; trailing empty bars (dead air while reaching for the
- *     stop key) are trimmed, and what's left rounds to the nearest
- *     4-bar interval. `captureDurationSeconds` (how long it actually
- *     ran, from recordingSession.js's own clock) is required here, not
+ *     stops it, and the length is recognized from what was played (see
+ *     theory.js's recognizeSectionBars): empty bars at either end are
+ *     dropped, and the rest is counted in whole bars, preferring a
+ *     4-bar (then 2-bar) phrase when a held final chord makes that a
+ *     fair reading. `captureDurationSeconds` (how long it actually ran,
+ *     from recordingSession.js's own clock) is required here, not
  *     derived from the notes: dead air has no MIDI message at all.
  *   - Every take after that plays back against the section's existing
  *     length and auto-stops there, clipped to it.
  *
- * `beatsPerBar` is the song's time signature (its numerator) -- the
- * trim and the 4-bar rounding both measure "a bar" in its terms.
+ * `beatsPerBar` is the song's time signature (its numerator) -- "a
+ * bar" is measured in its terms.
  */
-function sectionLengthFromOnsets(onsetBeats, captureDurationSeconds, tempo, beatsPerBar) {
-  const totalBeats = captureDurationSeconds * (tempo / 60);
-  return roundToBarInterval(trimTrailingEmptyBars(totalBeats, onsetBeats, beatsPerBar), 4, beatsPerBar);
+function withRecognizedLength(events, captureDurationSeconds, tempo, beatsPerBar) {
+  const { startBar, bars } = recognizeSectionBars(events, captureDurationSeconds * (tempo / 60), beatsPerBar);
+  const shift = startBar * beatsPerBar;
+  const sectionLengthBeats = bars * beatsPerBar;
+  const shifted = events.map((e) => ({ ...e, start: e.start - shift, end: e.end - shift }));
+  return { events: clipToSectionLength(shifted, sectionLengthBeats), sectionLengthBeats };
 }
 
 /**
@@ -158,7 +162,8 @@ export function processChordsPass(
   });
 
   if (setsLength) {
-    return { chords, sectionLengthBeats: sectionLengthFromOnsets(chords.map((c) => c.start), durationSeconds, tempo, beatsPerBar), skippedClusterCount };
+    const recognized = withRecognizedLength(chords, durationSeconds, tempo, beatsPerBar);
+    return { chords: recognized.events, sectionLengthBeats: recognized.sectionLengthBeats, skippedClusterCount };
   }
   return { chords: clipToSectionLength(chords, sectionLengthBeats), sectionLengthBeats, skippedClusterCount };
 }
@@ -211,7 +216,8 @@ export function processLinePass(
   }));
 
   if (setsLength) {
-    return { notes, sectionLengthBeats: sectionLengthFromOnsets(notes.map((n) => n.start), durationSeconds, tempo, beatsPerBar) };
+    const recognized = withRecognizedLength(notes, durationSeconds, tempo, beatsPerBar);
+    return { notes: recognized.events, sectionLengthBeats: recognized.sectionLengthBeats };
   }
   return { notes: clipToSectionLength(notes, sectionLengthBeats), sectionLengthBeats };
 }

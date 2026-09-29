@@ -161,6 +161,31 @@ describe('RecordingSession: any part can set the length, or record against it', 
     expect(session.result.sectionLengthBeats).toBeGreaterThan(0);
   });
 
+  it('currentBar() on an open-ended take counts from the bar the first note landed in', async () => {
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'chords' }); // 40ms bars
+    session.start();
+    await wait(60); // count-in over
+    expect(session.currentBar()).toBeNull(); // nothing played yet -- no section to count
+    await wait(50); // well into the second bar of capture
+    session.handleMidiMessage({ timestamp: performance.now(), type: 'noteon', note: 60, velocity: 90 });
+    expect(session.currentBar()).toBe(1);
+    await wait(45);
+    expect(session.currentBar()).toBeGreaterThanOrEqual(2);
+    session.cancel();
+  });
+
+  it('currentBar() counts bars from the section downbeat -- after the pickup bar on a fixed line take', async () => {
+    const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'melody' });
+    expect(session.currentBar()).toBeNull();
+    session.start({ sectionLengthBeats: 20 });
+    await wait(60); // count-in over; into the pickup bar
+    expect(session.currentBar()).toBeLessThanOrEqual(0);
+    await wait(60); // past the 40ms pickup bar
+    expect(session.currentBar()).toBeGreaterThanOrEqual(1);
+    session.cancel();
+    expect(session.currentBar()).toBeNull();
+  });
+
   it('a chords take against an existing length auto-finishes there, and never gets a pickup bar', async () => {
     let result = null;
     const session = new RecordingSession({ tempo: FAST_TEMPO, part: 'chords', onDone: (r) => (result = r) });

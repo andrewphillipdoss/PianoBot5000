@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMidi } from '../hooks/MidiProvider.jsx';
 import { useRecordingSession } from '../hooks/useRecordingSession.js';
 import { PART_NAMES } from '../parts.js';
@@ -60,7 +60,7 @@ export default function RecordPart({
 }) {
   const setsLength = sectionLengthBeats === null;
   const isLine = part !== 'chords';
-  const { phase, result, error, isPickupBar, start, stop, restart, handleMidiMessage } = useRecordingSession({
+  const { phase, result, error, isPickupBar, start, stop, restart, handleMidiMessage, currentBar } = useRecordingSession({
     tempo,
     part,
     subdivisionsPerBeat,
@@ -96,6 +96,16 @@ export default function RecordPart({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [phase, start, stop, restart, sectionLengthBeats, backing, setsLength]);
+
+  // A live bar counter while capturing -- on an open-ended take it's
+  // how many bars the section is heading for; on a fixed one, where
+  // you are in it. Polled rather than pushed: it's display only.
+  const [bar, setBar] = useState(null);
+  useEffect(() => {
+    if (phase !== 'capturing') return undefined;
+    const id = setInterval(() => setBar(currentBar()), 100);
+    return () => clearInterval(id);
+  }, [phase, currentBar]);
 
   const heldNotes = useMemo(() => [...midi.heldNotes].sort((a, b) => a - b), [midi.heldNotes]);
   const heldChord = useMemo(() => {
@@ -179,7 +189,7 @@ export default function RecordPart({
             </button>
             <span style={{ color: 'var(--ink-soft)', fontSize: 14, textAlign: 'center', maxWidth: 560 }}>
               {setsLength
-                ? `Press Space (or click) -- count-in, then play the ${partName.toLowerCase()}, and press Space again when you're done. This first take sets the section's length.`
+                ? `Press Space (or click) -- count-in, then play the ${partName.toLowerCase()}, and press Space again when you're done. This first take sets the section's length -- counted from what you actually play, so there's no need to stop right on the barline.`
                 : `Press Space (or click) -- count-in, ${willHavePickup ? 'a pickup bar for any lead-in notes, ' : ''}then the section plays back for ${bars} bar${bars === 1 ? '' : 's'} while you play the ${partName.toLowerCase()}. It stops by itself.`}
             </span>
             <span style={{ color: 'var(--ink-soft)', fontSize: 13, fontStyle: 'italic', textAlign: 'center', maxWidth: 560 }}>{PART_HINTS[part]}</span>
@@ -201,6 +211,15 @@ export default function RecordPart({
             <div className="status-pill">
               {isPickupBar ? `Pickup bar -- Section ${sectionLabel}` : `Recording -- Section ${sectionLabel}, ${partName}`}
             </div>
+            {setsLength && bar === null && (
+              <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Start whenever you&apos;re ready -- bars before your first note aren&apos;t counted</span>
+            )}
+            {!isPickupBar && bar >= 1 && (
+              <span className="bar-counter" aria-live="off">
+                Bar {setsLength ? bar : Math.min(bar, bars)}
+                {!setsLength && <span className="bar-counter__of"> of {bars}</span>}
+              </span>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minHeight: 40 }}>
               <span style={{ fontSize: 13, color: 'var(--ink-soft)' }}>{heldNotes.map(midiNoteName).join(' ') || '...'}</span>
               {heldChord && (
